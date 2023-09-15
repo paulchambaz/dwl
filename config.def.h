@@ -1,7 +1,8 @@
 /* appearance */
 static const int sloppyfocus               = 1;  /* focus follows mouse */
 static const int bypass_surface_visibility = 0;  /* 1 means idle inhibitors will disable idle tracking even if it's surface isn't visible  */
-static const unsigned int borderpx         = 1;  /* border pixel of windows */
+static const unsigned int borderpx         = 2;  /* border pixel of windows */
+// TODO: put correct color
 static const float bordercolor[]           = {0.5, 0.5, 0.5, 1.0};
 static const float focuscolor[]            = {1.0, 0.0, 0.0, 1.0};
 /* To conform the xdg-protocol, set the alpha to zero to restore the old behavior */
@@ -24,7 +25,6 @@ static const Layout layouts[] = {
 	/* symbol     arrange function */
 	{ "[]=",      tile },
 	{ "><>",      NULL },    /* no layout function means floating behavior */
-	{ "[M]",      monocle },
 };
 
 /* monitors */
@@ -43,11 +43,11 @@ static const struct xkb_rule_names xkb_rules = {
 	/* example:
 	.options = "ctrl:nocaps",
 	*/
-	.options = NULL,
+	.options = "compose:ralt",
 };
 
-static const int repeat_rate = 25;
-static const int repeat_delay = 600;
+static const int repeat_rate = 60;
+static const int repeat_delay = 200;
 
 /* Trackpad */
 static const int tap_to_click = 1;
