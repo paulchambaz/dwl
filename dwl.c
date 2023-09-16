@@ -1071,8 +1071,8 @@ createnotify(struct wl_listener *listener, void *data)
 
 	wl_client_get_credentials(c->surface.xdg->client->client, &c->pid, NULL, NULL);
 
-	wlr_xdg_toplevel_set_wm_capabilities(xdg_surface->toplevel,
-			WLR_XDG_TOPLEVEL_WM_CAPABILITIES_FULLSCREEN);
+	/* wlr_xdg_toplevel_set_wm_capabilities(xdg_surface->toplevel, */
+	/* 		WLR_XDG_TOPLEVEL_WM_CAPABILITIES_FULLSCREEN); */
 
 	LISTEN(&xdg_surface->events.map, &c->map, mapnotify);
 	LISTEN(&xdg_surface->events.unmap, &c->unmap, unmapnotify);
