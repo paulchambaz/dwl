@@ -11,6 +11,7 @@ static const float fullscreen_bg[]         = {0.0, 0.0, 0.0, 1.0};
 /* Autostart */
 static const char *const autostart[] = {
 	      "foot", "--server", NULL,
+        ""swaybg", "-i", "~/.wallpaper.jpg", NULL,
         NULL /* terminate */
 };
 
