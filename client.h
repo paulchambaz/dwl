@@ -167,6 +167,16 @@ client_get_appid(Client *c)
 	return c->surface.xdg->toplevel->app_id;
 }
 
+static inline int
+client_get_pid(Client *c)
+{
+#ifdef XWAYLAND
+	if (client_is_x11(c))
+		return c->surface.xwayland->pid;
+#endif
+	return 0;
+}
+
 static inline void
 client_get_geometry(Client *c, struct wlr_box *geom)
 {
