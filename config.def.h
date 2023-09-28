@@ -11,7 +11,7 @@ static const float fullscreen_bg[]         = {0.0, 0.0, 0.0, 1.0};
 /* Autostart */
 static const char *const autostart[] = {
 	      "foot", "--server", NULL,
-        "swaybg", "-i", "~/.wallpaper.jpg", NULL,
+        "swaybg", "-i", "/home/paul/.config/wallpaper.jpg", NULL,
         NULL /* terminate */
 };
 
@@ -24,8 +24,6 @@ static const Rule rules[] = {
 	/* examples:
 	{ "Gimp",     NULL,       0,            1,          0,      1,         -1 },
 	*/
-	{ "firefox",  NULL,       1 << 8,       0,          0,      1,         -1 },
-	{ "foot",     NULL,       0,            0,          1,      1,         -1 },
 };
 
 /* layout(s) */
@@ -48,10 +46,8 @@ static const MonitorRule monrules[] = {
 /* keyboard */
 static const struct xkb_rule_names xkb_rules = {
 	/* can specify fields: rules, model, layout, variant, options */
-	/* example:
-	.options = "ctrl:nocaps",
-	*/
-	.options = "compose:ralt",
+	/* .options = "ctrl:nocaps", */
+	.options = "compose:ralt|ctrl:nocaps",
 };
 
 static const int repeat_rate = 60;
@@ -101,6 +97,7 @@ static const enum libinput_config_tap_button_map button_map = LIBINPUT_CONFIG_TA
 
 /* If you want to use the windows key for MODKEY, use WLR_MODIFIER_LOGO */
 #define MODKEY WLR_MODIFIER_LOGO
+#define ALTKEY WLR_MODIFIER_ALT
 
 #define TAGKEYS(KEY,SKEY,TAG) \
 	{ MODKEY,                    KEY,            view,            {.ui = 1 << TAG} }, \
@@ -111,15 +108,42 @@ static const enum libinput_config_tap_button_map button_map = LIBINPUT_CONFIG_TA
 /* helper for spawning shell commands in the pre dwm-5.0 fashion */
 #define SHCMD(cmd) { .v = (const char*[]){ "/bin/sh", "-c", cmd, NULL } }
 
-/* commands */
-static const char *termcmd[] = { "footclient", NULL };
-static const char *menucmd[] = { "bemenu-run", NULL };
+#define CMD(cmd) (static const char*[]) { cmd, NULL };
+
+static const char *prev[] = { "mpc", "prev", NULL };
+static const char *pause[] = { "mpc", "toggle", NULL };
+static const char *next[] = { "mpc", "next", NULL };
+static const char *voldn[] = { "mpc", "volume", "-10", NULL };
+static const char *volup[] = { "mpc", "volume", "+10", NULL };
+
+// TODO: add those
+// XF86AudioMute : pactl -- set-sink-mute @DEFAULT_SINK@ toggle
+// XF86AudioLowerVolume : pactl -- set-sink-volume @DEFAULT_SINK@ -10%
+// XF86AudioRaiseVolume : pactl -- set-sink-volume @DEFAULT_SINK@ +10%
+// XF86Tools : pactl -- set-source-mute @DEFAULT_SOURCE@ toggle
+// XF86MonBrightnessDown : bright -10%
+// XF86MonBrightnessUp : bright -10%
+// Print : screenshot
+// shift + Print : screenshot fullscreen
 
 static const Key keys[] = {
 	/* Note that Shift changes certain key codes: c -> C, 2 -> at, etc. */
 	/* modifier                  key                 function        argument */
-	{ MODKEY,                    XKB_KEY_s,          spawn,          {.v = menucmd} },
-	{ MODKEY,                    XKB_KEY_t,          spawn,          {.v = termcmd} },
+	{ MODKEY,                    XKB_KEY_s,          spawn,          {.v = CMD("footclient") } },
+	{ MODKEY,                    XKB_KEY_t,          spawn,          {.v = CMD("bemenu-run") } },
+	{ MODKEY,                    XKB_KEY_w,          spawn,          {.v = CMD("openurl") } },
+	{ MODKEY,                    XKB_KEY_m,          spawn,          {.v = CMD("mpcube") } },
+	{ MODKEY,                    XKB_KEY_d,          spawn,          {.v = CMD("discord") } },
+	{ MODKEY,                    XKB_KEY_p,          spawn,          {.v = CMD("passmenu") } },
+	{ MODKEY|WLR_MODIFIER_SHIFT, XKB_KEY_P,          spawn,          {.v = CMD("otppassmenu") } },
+	{ MODKEY,                    XKB_KEY_Delete,     spawn,          {.v = CMD("slock") } },
+	{ MODKEY,                    XKB_KEY_e,          spawn,          {.v = CMD("pcmanfm") } },
+	{ MODKEY,                    XKB_KEY_i,          spawn,          {.v = CMD("mountusb") } },
+	{ MODKEY|WLR_MODIFIER_SHIFT, XKB_KEY_J,          spawn,          {.v = prev } },
+	{ MODKEY|WLR_MODIFIER_SHIFT, XKB_KEY_K,          spawn,          {.v = pause } },
+	{ MODKEY|WLR_MODIFIER_SHIFT, XKB_KEY_L,          spawn,          {.v = next } },
+	{ MODKEY|WLR_MODIFIER_SHIFT, XKB_KEY_underscore, spawn,          {.v = voldn } },
+	{ MODKEY|WLR_MODIFIER_SHIFT, XKB_KEY_plus,       spawn,          {.v = volup } },
 	{ MODKEY,                    XKB_KEY_j,          focusstack,     {.i = +1} },
 	{ MODKEY,                    XKB_KEY_k,          focusstack,     {.i = -1} },
 	{ MODKEY,                    XKB_KEY_h,          setmfact,       {.f = -0.05} },
