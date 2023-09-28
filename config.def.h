@@ -136,8 +136,8 @@ static const char *cmd_volup[] = { "mpc", "volume", "+10", NULL };
 static const Key keys[] = {
 	/* Note that Shift changes certain key codes: c -> C, 2 -> at, etc. */
 	/* modifier                  key                 function        argument */
-	{ MODKEY,                    XKB_KEY_s,          spawn,          {.v = cmd_foot } },
-	{ MODKEY,                    XKB_KEY_t,          spawn,          {.v = cmd_bemenu } },
+	{ MODKEY,                    XKB_KEY_s,          spawn,          {.v = cmd_bemenu } },
+	{ MODKEY,                    XKB_KEY_t,          spawn,          {.v = cmd_foot } },
 	{ MODKEY,                    XKB_KEY_w,          spawn,          {.v = cmd_openurl } },
 	{ MODKEY,                    XKB_KEY_m,          spawn,          {.v = cmd_mpcube } },
 	{ MODKEY,                    XKB_KEY_d,          spawn,          {.v = cmd_discord } },
