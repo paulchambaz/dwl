@@ -21,9 +21,7 @@ static const int tagcount = TAGCOUNT;
 
 static const Rule rules[] = {
 	/* app_id     title       tags mask     isfloating  isterm  noswallow  monitor */
-	/* examples:
 	{ "Gimp",     NULL,       0,            1,          0,      1,         -1 },
-	*/
 };
 
 /* layout(s) */
@@ -110,11 +108,11 @@ static const enum libinput_config_tap_button_map button_map = LIBINPUT_CONFIG_TA
 
 #define CMD(cmd) (static const char*[]) { cmd, NULL };
 
-static const char *prev[] = { "mpc", "prev", NULL };
-static const char *pause[] = { "mpc", "toggle", NULL };
-static const char *next[] = { "mpc", "next", NULL };
-static const char *voldn[] = { "mpc", "volume", "-10", NULL };
-static const char *volup[] = { "mpc", "volume", "+10", NULL };
+static const char *cmd_prev[] = { "mpc", "prev", NULL };
+static const char *cmd_pause[] = { "mpc", "toggle", NULL };
+static const char *cmd_next[] = { "mpc", "next", NULL };
+static const char *cmd_voldn[] = { "mpc", "volume", "-10", NULL };
+static const char *cmd_volup[] = { "mpc", "volume", "+10", NULL };
 
 // TODO: add those
 // XF86AudioMute : pactl -- set-sink-mute @DEFAULT_SINK@ toggle
@@ -139,11 +137,11 @@ static const Key keys[] = {
 	{ MODKEY,                    XKB_KEY_Delete,     spawn,          {.v = CMD("slock") } },
 	{ MODKEY,                    XKB_KEY_e,          spawn,          {.v = CMD("pcmanfm") } },
 	{ MODKEY,                    XKB_KEY_i,          spawn,          {.v = CMD("mountusb") } },
-	{ MODKEY|WLR_MODIFIER_SHIFT, XKB_KEY_J,          spawn,          {.v = prev } },
-	{ MODKEY|WLR_MODIFIER_SHIFT, XKB_KEY_K,          spawn,          {.v = pause } },
-	{ MODKEY|WLR_MODIFIER_SHIFT, XKB_KEY_L,          spawn,          {.v = next } },
-	{ MODKEY|WLR_MODIFIER_SHIFT, XKB_KEY_underscore, spawn,          {.v = voldn } },
-	{ MODKEY|WLR_MODIFIER_SHIFT, XKB_KEY_plus,       spawn,          {.v = volup } },
+	{ MODKEY|WLR_MODIFIER_SHIFT, XKB_KEY_J,          spawn,          {.v = cmd_prev } },
+	{ MODKEY|WLR_MODIFIER_SHIFT, XKB_KEY_K,          spawn,          {.v = cmd_pause } },
+	{ MODKEY|WLR_MODIFIER_SHIFT, XKB_KEY_L,          spawn,          {.v = cmd_next } },
+	{ MODKEY|WLR_MODIFIER_SHIFT, XKB_KEY_underscore, spawn,          {.v = cmd_voldn } },
+	{ MODKEY|WLR_MODIFIER_SHIFT, XKB_KEY_plus,       spawn,          {.v = cmd_volup } },
 	{ MODKEY,                    XKB_KEY_j,          focusstack,     {.i = +1} },
 	{ MODKEY,                    XKB_KEY_k,          focusstack,     {.i = -1} },
 	{ MODKEY,                    XKB_KEY_h,          setmfact,       {.f = -0.05} },
