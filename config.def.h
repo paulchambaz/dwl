@@ -108,6 +108,15 @@ static const enum libinput_config_tap_button_map button_map = LIBINPUT_CONFIG_TA
 
 #define CMD(cmd) (static const char*[]) { cmd, NULL };
 
+static const char *cmd_foot[] = { "footclient", NULL };
+static const char *cmd_bemenu[] = { "bemenu-run", NULL };
+static const char *cmd_openurl[] = { "openurl", NULL };
+static const char *cmd_mpcube[] = { "mpcube", NULL };
+static const char *cmd_discord[] = { "discord", NULL };
+static const char *cmd_passmenu[] = { "passmenu", NULL };
+static const char *cmd_otppassmenu[] = { "otppassmenu", NULL };
+static const char *cmd_slock[] = { "slock", NULL };
+static const char *cmd_pcmanfm[] = { "footclient", NULL };
 static const char *cmd_prev[] = { "mpc", "prev", NULL };
 static const char *cmd_pause[] = { "mpc", "toggle", NULL };
 static const char *cmd_next[] = { "mpc", "next", NULL };
@@ -127,16 +136,15 @@ static const char *cmd_volup[] = { "mpc", "volume", "+10", NULL };
 static const Key keys[] = {
 	/* Note that Shift changes certain key codes: c -> C, 2 -> at, etc. */
 	/* modifier                  key                 function        argument */
-	{ MODKEY,                    XKB_KEY_s,          spawn,          {.v = CMD("footclient") } },
-	{ MODKEY,                    XKB_KEY_t,          spawn,          {.v = CMD("bemenu-run") } },
-	{ MODKEY,                    XKB_KEY_w,          spawn,          {.v = CMD("openurl") } },
-	{ MODKEY,                    XKB_KEY_m,          spawn,          {.v = CMD("mpcube") } },
-	{ MODKEY,                    XKB_KEY_d,          spawn,          {.v = CMD("discord") } },
-	{ MODKEY,                    XKB_KEY_p,          spawn,          {.v = CMD("passmenu") } },
-	{ MODKEY|WLR_MODIFIER_SHIFT, XKB_KEY_P,          spawn,          {.v = CMD("otppassmenu") } },
-	{ MODKEY,                    XKB_KEY_Delete,     spawn,          {.v = CMD("slock") } },
-	{ MODKEY,                    XKB_KEY_e,          spawn,          {.v = CMD("pcmanfm") } },
-	{ MODKEY,                    XKB_KEY_i,          spawn,          {.v = CMD("mountusb") } },
+	{ MODKEY,                    XKB_KEY_s,          spawn,          {.v = cmd_foot } },
+	{ MODKEY,                    XKB_KEY_t,          spawn,          {.v = cmd_bemenu } },
+	{ MODKEY,                    XKB_KEY_w,          spawn,          {.v = cmd_openurl } },
+	{ MODKEY,                    XKB_KEY_m,          spawn,          {.v = cmd_mpcube } },
+	{ MODKEY,                    XKB_KEY_d,          spawn,          {.v = cmd_discord } },
+	{ MODKEY,                    XKB_KEY_p,          spawn,          {.v = cmd_passmenu } },
+	{ MODKEY|WLR_MODIFIER_SHIFT, XKB_KEY_P,          spawn,          {.v = cmd_otppassmenu } },
+	{ MODKEY,                    XKB_KEY_Delete,     spawn,          {.v = cmd_slock } },
+	{ MODKEY,                    XKB_KEY_e,          spawn,          {.v = cmd_pcmanfm } },
 	{ MODKEY|WLR_MODIFIER_SHIFT, XKB_KEY_J,          spawn,          {.v = cmd_prev } },
 	{ MODKEY|WLR_MODIFIER_SHIFT, XKB_KEY_K,          spawn,          {.v = cmd_pause } },
 	{ MODKEY|WLR_MODIFIER_SHIFT, XKB_KEY_L,          spawn,          {.v = cmd_next } },
