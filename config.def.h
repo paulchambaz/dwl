@@ -25,6 +25,13 @@ static const Env envs[] = {
 	{ "XDG_CURRENT_DESKTOP",	"wlroots" },
 };
 
+/* Autostart */
+static const char *const autostart[] = {
+        "wbg", "/home/paul/.config/wallpaper.jpg", NULL,
+        NULL /* terminate */
+};
+
+
 /* NOTE: ALWAYS keep a rule declared even if you don't use rules (e.g leave at least one example) */
 static const Rule rules[] = {
 	/* app_id             title       tags mask     isfloating   monitor */
