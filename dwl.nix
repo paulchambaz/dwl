@@ -6,12 +6,17 @@
   libinput,
   libxkbcommon,
   pixman,
+  fcft,
+  libdrm,
   wayland,
   wayland-protocols,
   wlroots_0_18,
   xorg,
   xwayland,
-}: {rootColor ? "0x222222ff"}:
+}:
+{
+  rootColor ? "0x222222ff",
+}:
 stdenv.mkDerivation {
   pname = "dwl";
   version = "0.7-local";
@@ -25,6 +30,8 @@ stdenv.mkDerivation {
   buildInputs = [
     libinput
     libxkbcommon
+    fcft
+    libdrm
     pixman
     wayland
     wayland-protocols
@@ -50,6 +57,6 @@ stdenv.mkDerivation {
     homepage = "https://codeberg.org/dwl/dwl";
     license = licenses.gpl3Only;
     platforms = platforms.linux;
-    maintainers = [];
+    maintainers = [ ];
   };
 }

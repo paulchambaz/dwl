@@ -1,18 +1,33 @@
 --- dwl.c
 +++ dwl.c
-@@ -344,11 +353,15 @@ static void setsel(struct wl_listener *listener, void *data);
+@@ -79,14 +82,17 @@
+ #define VISIBLEON(C, M)         ((M) && (C)->mon == (M) && ((C)->tags & (M)->tagset[(M)->seltags]))
+ #define LENGTH(X)               (sizeof X / sizeof X[0])
+ #define END(A)                  ((A) + LENGTH(A))
+-#define TAGMASK                 ((1u << TAGCOUNT) - 1)
++#define TAGMASK                 ((1u << LENGTH(tags)) - 1)
+ #define LISTEN(E, L, H)         wl_signal_add((E), ((L)->notify = (H), (L)))
+ #define LISTEN_STATIC(E, H)     do { static struct wl_listener _l = {.notify = (H)}; wl_signal_add((E), &_l); } while (0)
++#define TEXTW(mon, text)        (drwl_font_getwidth(mon->drw, text) + mon->lrpad)
+ 
+ /* enums */
++enum { SchemeNorm, SchemeSel, SchemeUrg }; /* color schemes */
+ enum { CurNormal, CurPressed, CurMove, CurResize }; /* cursor */
+ enum { XDGShell, LayerShell, X11 }; /* client types */
+ enum { LyrBg, LyrBottom, LyrTile, LyrFloat, LyrTop, LyrFS, LyrOverlay, LyrBlock, NUM_LAYERS }; /* scene layers */
++enum { ClkTagBar, ClkLtSymbol, ClkStatus, ClkTitle, ClkClient, ClkRoot }; /* clicks */
+ #ifdef XWAYLAND
+ enum { NetWMWindowTypeDialog, NetWMWindowTypeSplash, NetWMWindowTypeToolbar,
+ 	NetWMWindowTypeUtility, NetLast }; /* EWMH atoms */
+@@ -364,9 +396,11 @@ static void setsel(struct wl_listener *listener, void *data);
  static void setup(void);
  static void spawn(const Arg *arg);
  static void startdrag(struct wl_listener *listener, void *data);
-+static void swallow(Client *c, Client *toswallow);
++static int statusin(int fd, unsigned int mask, void *data);
  static void tag(const Arg *arg);
  static void tagmon(const Arg *arg);
-+static Client *termforwin(Client *c);
  static void tile(Monitor *m);
++static void togglebar(const Arg *arg);
  static void togglefloating(const Arg *arg);
  static void togglefullscreen(const Arg *arg);
-+static void toggleswallow(const Arg *arg);
-+static void toggleautoswallow(const Arg *arg);
  static void toggletag(const Arg *arg);
- static void toggleview(const Arg *arg);
- static void unlocksession(struct wl_listener *listener, void *data);
