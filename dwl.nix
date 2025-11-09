@@ -897,6 +897,47 @@ let
     f10 = "XKB_KEY_F10";
     f11 = "XKB_KEY_F11";
     f12 = "XKB_KEY_F12";
+
+    # Media keys
+    audioplay = "XKB_KEY_XF86AudioPlay";
+    audiopause = "XKB_KEY_XF86AudioPause";
+    audioplaypause = "XKB_KEY_XF86AudioPlay";
+    audiostop = "XKB_KEY_XF86AudioStop";
+    audionext = "XKB_KEY_XF86AudioNext";
+    audioprev = "XKB_KEY_XF86AudioPrev";
+    audioprevious = "XKB_KEY_XF86AudioPrev";
+    audiomute = "XKB_KEY_XF86AudioMute";
+    audiolowervolume = "XKB_KEY_XF86AudioLowerVolume";
+    audioraisevolume = "XKB_KEY_XF86AudioRaiseVolume";
+    volumedown = "XKB_KEY_XF86AudioLowerVolume";
+    volumeup = "XKB_KEY_XF86AudioRaiseVolume";
+    mute = "XKB_KEY_XF86AudioMute";
+    brightnessdown = "XKB_KEY_XF86MonBrightnessDown";
+    brightnessup = "XKB_KEY_XF86MonBrightnessUp";
+    monbrightnessdown = "XKB_KEY_XF86MonBrightnessDown";
+    monbrightnessup = "XKB_KEY_XF86MonBrightnessUp";
+    print = "XKB_KEY_Print";
+    printscreen = "XKB_KEY_Print";
+    sysrq = "XKB_KEY_Sys_Req";
+    calculator = "XKB_KEY_XF86Calculator";
+    mail = "XKB_KEY_XF86Mail";
+    homepage = "XKB_KEY_XF86HomePage";
+    search = "XKB_KEY_XF86Search";
+    favorites = "XKB_KEY_XF86Favorites";
+    display = "XKB_KEY_XF86Display";
+    touchpadtoggle = "XKB_KEY_XF86TouchpadToggle";
+    touchpadon = "XKB_KEY_XF86TouchpadOn";
+    touchpadoff = "XKB_KEY_XF86TouchpadOff";
+    kbdbrightnessdown = "XKB_KEY_XF86KbdBrightnessDown";
+    kbdbrightnessup = "XKB_KEY_XF86KbdBrightnessUp";
+    sleep = "XKB_KEY_XF86Sleep";
+    wakeup = "XKB_KEY_XF86WakeUp";
+    poweroff = "XKB_KEY_XF86PowerOff";
+    wlan = "XKB_KEY_XF86WLAN";
+    tools = "XKB_KEY_XF86Tools";
+    battery = "XKB_KEY_XF86Battery";
+    bluetooth = "XKB_KEY_XF86Bluetooth";
+    micmute = "XKB_KEY_XF86AudioMicMute";
   };
 
   # Shifted key mapping (for TAGKEYS compatibility)
