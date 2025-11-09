@@ -453,11 +453,9 @@ let
     in
     lib.concatStringsSep ",\n\t" entries;
 
-  getGapValue = gapsCfg: field:
-    if gapsCfg.enable then field else 0;
-  
-  getGapBool = gapsCfg: field:
-    if gapsCfg.enable then field else false;
+  getGapValue = gapsCfg: field: if gapsCfg.enable then field else 0;
+
+  getGapBool = gapsCfg: field: if gapsCfg.enable then field else false;
 
   formatAutostart =
     items:
@@ -706,7 +704,70 @@ let
   sanitizeCommandName =
     cmd:
     let
-      sanitized = lib.replaceStrings [ " " "-" "/" "." "~" "$" ] [ "_" "_" "_" "_" "_" "_" ] cmd;
+      sanitized =
+        lib.replaceStrings
+          [
+            " "
+            "-"
+            "/"
+            "."
+            "~"
+            "$"
+            "@"
+            "%"
+            "+"
+            "!"
+            "#"
+            "&"
+            "*"
+            "("
+            ")"
+            "["
+            "]"
+            "{"
+            "}"
+            "|"
+            ";"
+            ":"
+            "'"
+            "\""
+            "<"
+            ">"
+            "?"
+            ","
+            "="
+          ]
+          [
+            "_"
+            "_"
+            "_"
+            "_"
+            "_"
+            "_"
+            "_"
+            "_"
+            "_"
+            "_"
+            "_"
+            "_"
+            "_"
+            "_"
+            "_"
+            "_"
+            "_"
+            "_"
+            "_"
+            "_"
+            "_"
+            "_"
+            "_"
+            "_"
+            "_"
+            "_"
+            "_"
+            "_"
+          ]
+          cmd;
     in
     "${sanitized}_cmd";
 
