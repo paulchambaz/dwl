@@ -848,7 +848,7 @@ let
     up = "XKB_KEY_Up";
     down = "XKB_KEY_Down";
 
-    # Punctuation
+    # Punctuation (base)
     comma = "XKB_KEY_comma";
     period = "XKB_KEY_period";
     slash = "XKB_KEY_slash";
@@ -860,6 +860,29 @@ let
     equal = "XKB_KEY_equal";
     bracketleft = "XKB_KEY_bracketleft";
     bracketright = "XKB_KEY_bracketright";
+
+    # Punctuation (shifted) - so you can write mod+less directly
+    less = "XKB_KEY_less";
+    greater = "XKB_KEY_greater";
+    question = "XKB_KEY_question";
+    bar = "XKB_KEY_bar";
+    colon = "XKB_KEY_colon";
+    quotedbl = "XKB_KEY_quotedbl";
+    asciitilde = "XKB_KEY_asciitilde";
+    underscore = "XKB_KEY_underscore";
+    plus = "XKB_KEY_plus";
+    braceleft = "XKB_KEY_braceleft";
+    braceright = "XKB_KEY_braceright";
+    exclam = "XKB_KEY_exclam";
+    at = "XKB_KEY_at";
+    numbersign = "XKB_KEY_numbersign";
+    dollar = "XKB_KEY_dollar";
+    percent = "XKB_KEY_percent";
+    asciicircum = "XKB_KEY_asciicircum";
+    ampersand = "XKB_KEY_ampersand";
+    asterisk = "XKB_KEY_asterisk";
+    parenleft = "XKB_KEY_parenleft";
+    parenright = "XKB_KEY_parenright";
 
     # Function keys
     f1 = "XKB_KEY_F1";
@@ -888,6 +911,17 @@ let
     "8" = "XKB_KEY_asterisk";
     "9" = "XKB_KEY_parenleft";
     "0" = "XKB_KEY_parenright";
+    "minus" = "XKB_KEY_underscore";
+    "equal" = "XKB_KEY_plus";
+    "bracketleft" = "XKB_KEY_braceleft";
+    "bracketright" = "XKB_KEY_braceright";
+    "backslash" = "XKB_KEY_bar";
+    "semicolon" = "XKB_KEY_colon";
+    "apostrophe" = "XKB_KEY_quotedbl";
+    "grave" = "XKB_KEY_asciitilde";
+    "comma" = "XKB_KEY_less";
+    "period" = "XKB_KEY_greater";
+    "slash" = "XKB_KEY_question";
   };
 
   actionTypeMap = {
