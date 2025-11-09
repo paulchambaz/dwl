@@ -704,23 +704,18 @@ let
   sanitizeCommandName =
     cmd:
     let
-      specialChars = " -/.~$@%+!#&*()[]{}|;:'\"<>?,=`\\^";
-      charList = lib.stringToCharacters specialChars;
-      replacements = lib.genList (_: "_") (builtins.length charList);
-      sanitized = builtins.replaceStrings charList replacements cmd;
+      hash = builtins.hashString "sha256" cmd;
+      shortHash = builtins.substring 0 16 hash;
     in
-    "${sanitized}_cmd";
+    "cmd_${shortHash}";
 
   extractSpawnCommands =
     keys: mouse:
     let
       keySpawns = builtins.filter (bind: bind.action == "spawn") keys;
-
       mouseSpawns = builtins.filter (bind: bind.action == "spawn") mouse;
-
       allSpawns = keySpawns ++ mouseSpawns;
       commands = map (bind: bind.arg) allSpawns;
-
       unique = lib.unique commands;
     in
     unique;
@@ -733,7 +728,9 @@ let
         let
           varName = sanitizeCommandName cmd;
           parts = lib.splitString " " cmd;
-          quoted = map (s: ''"${s}"'') parts;
+          # Escape backslashes and double quotes in each part
+          escaped = map (s: lib.escape [ "\\" ''"'' ] s) parts;
+          quoted = map (s: ''"${s}"'') escaped;
           argv = lib.concatStringsSep ", " quoted;
         in
         ''static const char *${varName}[] = { ${argv}, NULL };'';
