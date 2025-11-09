@@ -720,24 +720,38 @@ let
     in
     unique;
 
-  formatCommands =
-    commands:
-    let
-      formatCmd =
-        cmd:
-        let
-          varName = sanitizeCommandName cmd;
-          parts = lib.splitString " " cmd;
-          # Escape backslashes and double quotes in each part
-          escaped = map (s: lib.escape [ "\\" ''"'' ] s) parts;
-          quoted = map (s: ''"${s}"'') escaped;
-          argv = lib.concatStringsSep ", " quoted;
-        in
-        ''static const char *${varName}[] = { ${argv}, NULL };'';
+formatCommands =
+  commands:
+  let
+    formatCmd =
+      cmd:
+      let
+        varName = sanitizeCommandName cmd;
+        # Check if command contains shell operators
+        needsShell = builtins.any (op: lib.hasInfix op cmd) ["&&" "||" "|" ">" "<" ";" "$" "`"];
+        
+        formattedCmd = 
+          if needsShell then
+            # Wrap in shell for commands with shell operators
+            let
+              escapedCmd = lib.escape ["\\" ''"''] cmd;
+            in
+            ''static const char *${varName}[] = { "/bin/sh", "-c", "${escapedCmd}", NULL };''
+          else
+            # Direct execution for simple commands
+            let
+              parts = lib.splitString " " cmd;
+              escaped = map (s: lib.escape ["\\" ''"''] s) parts;
+              quoted = map (s: ''"${s}"'') escaped;
+              argv = lib.concatStringsSep ", " quoted;
+            in
+            ''static const char *${varName}[] = { ${argv}, NULL };'';
+      in
+      formattedCmd;
 
-      formatted = map formatCmd commands;
-    in
-    lib.concatStringsSep "\n" formatted;
+    formatted = map formatCmd commands;
+  in
+  lib.concatStringsSep "\n" formatted;
 
   buildCommandLookup =
     commands:
