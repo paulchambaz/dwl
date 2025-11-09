@@ -6,3 +6,6 @@ dwl
 config.h
 .git
 result
+*.orig
+*.rej
+*.patch
