@@ -4,54 +4,75 @@
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
   };
-  outputs = {
-    self,
-    nixpkgs,
-    flake-utils,
-  }:
+  outputs =
+    {
+      self,
+      nixpkgs,
+      flake-utils,
+    }:
     flake-utils.lib.eachDefaultSystem (
-      system: let
+      system:
+      let
         pkgs = nixpkgs.legacyPackages.${system};
-      in {
+      in
+      {
         packages.default = import ./dwl.nix {
           inherit pkgs;
-          settings = {};
+          settings = { };
         };
       }
     )
     // {
-      homeManagerModules.default = {
-        config,
-        lib,
-        pkgs,
-        ...
-      }: let
-        cfg = config.wayland.windowManager.dwl;
-      in {
-        options.wayland.windowManager.dwl = {
-          enable = lib.mkEnableOption "dwl window manager";
-          
-          settings = lib.mkOption {
-            type = lib.types.attrs;
-            default = {};
-            description = "dwl configuration";
-          };
-          
-          package = lib.mkOption {
-            type = lib.types.package;
-            default = import ./dwl.nix {
-              inherit pkgs;
-              settings = cfg.settings;
+      homeManagerModules.default =
+        {
+          config,
+          lib,
+          pkgs,
+          ...
+        }:
+        let
+          cfg = config.wayland.windowManager.dwl;
+        in
+        {
+          options.wayland.windowManager.dwl = {
+            enable = lib.mkEnableOption "dwl window manager";
+
+            settings = lib.mkOption {
+              type = lib.types.attrs;
+              default = { };
+              description = "dwl configuration";
             };
-            description = "dwl package to use";
+
+            package = lib.mkOption {
+              type = lib.types.package;
+              default = import ./dwl.nix {
+                inherit pkgs;
+                settings = cfg.settings;
+              };
+              description = "dwl package to use";
+            };
+
+            systemd = {
+              enable = lib.mkEnableOption "dwl systemd integration" // {
+                default = true;
+              };
+
+              variables = lib.mkOption {
+                type = lib.types.listOf lib.types.str;
+                default = [
+                  "DISPLAY"
+                  "WAYLAND_DISPLAY"
+                  "XDG_CURRENT_DESKTOP"
+                ];
+                description = "Environment variables to import into systemd user session";
+              };
+            };
+          };
+
+          config = lib.mkIf cfg.enable {
+            home.packages = [ cfg.package ];
+            home.sessionVariables = cfg.settings.environment or { };
           };
         };
-        
-        config = lib.mkIf cfg.enable {
-          home.packages = [cfg.package];
-          
-          home.sessionVariables = cfg.settings.environment or {};
-        };
-      };
     };
 }
