@@ -704,11 +704,10 @@ let
   sanitizeCommandName =
     cmd:
     let
-      sanitized = builtins.replaceStrings (lib.stringToCharacters " -/.~$@%+!#&*()[]{}|;:'\"<>?,=`\\^") (
-        lib.genList
-        (_: "_")
-        36
-      ) cmd;
+      specialChars = " -/.~$@%+!#&*()[]{}|;:'\"<>?,=`\\^";
+      charList = lib.stringToCharacters specialChars;
+      replacements = lib.genList (_: "_") (builtins.length charList);
+      sanitized = builtins.replaceStrings charList replacements cmd;
     in
     "${sanitized}_cmd";
 
