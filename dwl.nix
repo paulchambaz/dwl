@@ -29,8 +29,8 @@ let
           vertical = 0;
         };
         padding = {
-          vertical = 0;
-          horizontal = 5;
+          vertical = 5;
+          horizontal = 0;
         };
       };
 
