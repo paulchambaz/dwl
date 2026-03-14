@@ -17,6 +17,7 @@ let
       smart_borders = true;
       smart_gaps = false;
       border_width = 1;
+      master_factor = 0.55;
     };
 
     appearance = {
@@ -24,12 +25,8 @@ let
         enable = true;
         position_top = true;
         padding = {
-          horizontal = 0;
-          vertical = 0;
-        };
-        margin = {
-          horizontal = 0;
-          vertical = 5;
+          vertical = 10;
+          horizontal = 10;
         };
       };
 
@@ -38,19 +35,16 @@ let
       colors = {
         root = "#000000";
         fullscreen = "#000000";
-
         unfocused = {
           text = "#bbbbbb";
           background = "#222222";
           border = "#444444";
         };
-
         focused = {
           text = "#eeeeee";
           background = "#005577";
           border = "#005577";
         };
-
         urgent = {
           text = "#ffffff";
           background = "#222222";
@@ -73,8 +67,12 @@ let
     };
 
     input = {
+      tablet = {
+        map_to_surface = false;
+      };
+
       keyboard = {
-        layout = "us";
+        layout = null;
         variant = null;
         options = null;
         repeat_rate = 25;
@@ -99,11 +97,21 @@ let
 
     windows = {
       swallow = {
-        enable = false;
-        border_multiplier = 0.0;
+        enable = true;
+        border_multiplier = 1.0;
       };
 
-      rules = [ ];
+      rules = [
+        {
+          app_id = "footclient";
+          title = null;
+          workspace = null;
+          floating = false;
+          terminal = true;
+          no_swallow = true;
+          monitor = -1;
+        }
+      ];
     };
 
     workspaces = {
@@ -138,12 +146,17 @@ let
     monitors = [
       {
         name = null;
-        master_factor = 0.5;
+        master_factor = 0.55;
         master_count = 1;
         scale = 1;
         default_layout = "tile";
         transform = "normal";
         position = "auto";
+        resx = 0;
+        resy = 0;
+        rate = 0.0;
+        mode = 0;
+        adaptive = true;
       }
     ];
 
@@ -155,7 +168,6 @@ let
           bind = "mod+b";
           action = "togglebar";
         }
-
         {
           bind = "mod+j";
           action = "focusstack";
@@ -166,7 +178,6 @@ let
           action = "focusstack";
           arg = -1;
         }
-
         {
           bind = "mod+i";
           action = "incnmaster";
@@ -187,7 +198,6 @@ let
           action = "setmfact";
           arg = 0.05;
         }
-
         {
           bind = "mod+return";
           action = "zoom";
@@ -200,7 +210,6 @@ let
           bind = "mod+shift+c";
           action = "killclient";
         }
-
         {
           bind = "mod+t";
           action = "setlayout";
@@ -220,7 +229,6 @@ let
           bind = "mod+space";
           action = "cyclelayout";
         }
-
         {
           bind = "mod+shift+space";
           action = "togglefloating";
@@ -229,7 +237,6 @@ let
           bind = "mod+e";
           action = "togglefullscreen";
         }
-
         {
           bind = "mod+0";
           action = "viewall";
@@ -238,7 +245,6 @@ let
           bind = "mod+shift+0";
           action = "tagall";
         }
-
         {
           bind = "mod+comma";
           action = "focusmon";
@@ -259,7 +265,6 @@ let
           action = "tagmon";
           arg = "right";
         }
-
         {
           bind = "mod+1";
           action = "view";
@@ -305,7 +310,6 @@ let
           action = "view";
           arg = 9;
         }
-
         {
           bind = "mod+shift+1";
           action = "tag";
@@ -351,7 +355,6 @@ let
           action = "tag";
           arg = 9;
         }
-
         {
           bind = "mod+shift+q";
           action = "quit";
@@ -371,13 +374,11 @@ let
           action = "setlayout";
           arg = "monocle";
         }
-
         {
           bind = "middle";
           target = "title";
           action = "zoom";
         }
-
         {
           bind = "mod+left";
           target = "client";
@@ -395,7 +396,6 @@ let
           action = "moveresize";
           arg = "resize";
         }
-
         {
           bind = "left";
           target = "tagbar";
@@ -439,22 +439,15 @@ let
     else
       toString v;
 
-  formatStringArray =
-    items:
-    let
-      quoted = map (s: ''"${s}"'') items;
-    in
-    lib.concatStringsSep ", " quoted;
+  formatStringArray = items: lib.concatStringsSep ", " (map (s: ''"${s}"'') items);
 
   formatEnvVars =
     envs:
-    let
-      entries = lib.mapAttrsToList (name: value: ''{ "${name}", "${value}" }'') envs;
-    in
-    lib.concatStringsSep ",\n\t" entries;
+    lib.concatStringsSep ",\n    " (
+      lib.mapAttrsToList (name: value: ''{ "${name}", "${value}" }'') envs
+    );
 
   getGapValue = gapsCfg: field: if gapsCfg.enable then field else 0;
-
   getGapBool = gapsCfg: field: if gapsCfg.enable then field else false;
 
   formatAutostart =
@@ -466,42 +459,57 @@ let
         formatCommand =
           cmd:
           let
-            parts = lib.splitString " " cmd;
-            quoted = map (s: ''"${s}"'') parts;
-            joined = lib.concatStringsSep ", " quoted;
+            needsShell = builtins.any (op: lib.hasInfix op cmd) [
+              "&&"
+              "||"
+              "|"
+              ">"
+              "<"
+              ";"
+              "$"
+              "`"
+              "'"
+            ];
           in
-          "${joined}, NULL";
-
-        formattedCommands = map formatCommand items;
+          if needsShell then
+            let
+              escapedCmd = lib.escape [ "\\" ''"'' ] cmd;
+            in
+            ''"/bin/sh", "-c", "${escapedCmd}", NULL''
+          else
+            let
+              parts = lib.splitString " " cmd;
+            in
+            lib.concatStringsSep ", " (map (s: ''"${s}"'') parts) + ", NULL";
       in
-      lib.concatStringsSep ",\n\t" formattedCommands;
+      lib.concatStringsSep ",\n    " (map formatCommand items) + ",\n    NULL";
 
   formatXkbRules =
     kb:
     let
-      fields = lib.filterAttrs (name: value: value != null) {
+      fields = lib.filterAttrs (_: v: v != null) {
         layout = kb.layout or null;
         variant = kb.variant or null;
         options = kb.options or null;
       };
-
-      formatField = name: value: ''.${name} = "${value}",'';
-
-      formattedFields = lib.mapAttrsToList formatField fields;
+      formattedFields = lib.mapAttrsToList (n: v: ".${n} = \"${v}\"") fields;
     in
-    if formattedFields == [ ] then "" else "\n\t" + lib.concatStringsSep "\n\t" formattedFields;
+    if formattedFields == [ ] then "{ 0 }" else "{ " + lib.concatStringsSep ", " formattedFields + " }";
 
-  hexToColorMacro =
-    hex:
+  hexToColorMacro = hex: "0x${lib.removePrefix "#" hex}ff";
+
+  formatColorScheme =
+    colors:
     let
-      cleanHex = lib.removePrefix "#" hex;
+      entry =
+        name: c:
+        "[${name}] = { ${hexToColorMacro c.text}, ${hexToColorMacro c.background}, ${hexToColorMacro c.border} }";
     in
-    "0x${cleanHex}ff";
-
-  formatColorScheme = colors: ''
-    [SchemeNorm] = { ${hexToColorMacro colors.unfocused.text}, ${hexToColorMacro colors.unfocused.background}, ${hexToColorMacro colors.unfocused.border} },
-      [SchemeSel]  = { ${hexToColorMacro colors.focused.text}, ${hexToColorMacro colors.focused.background}, ${hexToColorMacro colors.focused.border} },
-      [SchemeUrg]  = { ${hexToColorMacro colors.urgent.text}, ${hexToColorMacro colors.urgent.background}, ${hexToColorMacro colors.urgent.border} }'';
+    lib.concatStringsSep ",\n    " [
+      (entry "SchemeNorm" colors.unfocused)
+      (entry "SchemeSel" colors.focused)
+      (entry "SchemeUrg" colors.urgent)
+    ];
 
   scrollMethodMap = {
     "none" = "LIBINPUT_CONFIG_SCROLL_NO_SCROLL";
@@ -509,27 +517,29 @@ let
     "edge" = "LIBINPUT_CONFIG_SCROLL_EDGE";
     "on_button_down" = "LIBINPUT_CONFIG_SCROLL_ON_BUTTON_DOWN";
   };
-
   clickMethodMap = {
     "none" = "LIBINPUT_CONFIG_CLICK_METHOD_NONE";
     "button_areas" = "LIBINPUT_CONFIG_CLICK_METHOD_BUTTON_AREAS";
     "clickfinger" = "LIBINPUT_CONFIG_CLICK_METHOD_CLICKFINGER";
   };
-
   accelProfileMap = {
     "flat" = "LIBINPUT_CONFIG_ACCEL_PROFILE_FLAT";
     "adaptive" = "LIBINPUT_CONFIG_ACCEL_PROFILE_ADAPTIVE";
   };
-
   buttonMapMap = {
-    "lrm" = "LIBINPUT_CONFIG_TAP_MAP_LRM"; # left/right/middle
-    "lmr" = "LIBINPUT_CONFIG_TAP_MAP_LMR"; # left/middle/right
+    "lrm" = "LIBINPUT_CONFIG_TAP_MAP_LRM";
+    "lmr" = "LIBINPUT_CONFIG_TAP_MAP_LMR";
   };
-
   sendEventsMap = {
     "enabled" = "LIBINPUT_CONFIG_SEND_EVENTS_ENABLED";
     "disabled" = "LIBINPUT_CONFIG_SEND_EVENTS_DISABLED";
     "disabled_on_external_mouse" = "LIBINPUT_CONFIG_SEND_EVENTS_DISABLED_ON_EXTERNAL_MOUSE";
+  };
+  logLevelMap = {
+    "silent" = "WLR_SILENT";
+    "error" = "WLR_ERROR";
+    "info" = "WLR_INFO";
+    "debug" = "WLR_DEBUG";
   };
 
   mapEnum =
@@ -537,52 +547,70 @@ let
     if mapping ? ${value} then
       mapping.${value}
     else
-      throw ''
-        Invalid ${enumName}: "${value}"
-        Valid options: ${lib.concatStringsSep ", " (lib.attrNames mapping)}
-      '';
+      throw ''Invalid ${enumName}: "${value}". Valid: ${lib.concatStringsSep ", " (lib.attrNames mapping)}'';
 
   mapScrollMethod = mapEnum "scroll_method" scrollMethodMap;
   mapClickMethod = mapEnum "click_method" clickMethodMap;
   mapAccelProfile = mapEnum "accel_profile" accelProfileMap;
   mapButtonMap = mapEnum "button_map" buttonMapMap;
+  mapSendEvents = mapEnum "send_events_mode" sendEventsMap;
+  mapLogLevel = mapEnum "log_level" logLevelMap;
+
+  mapModkey =
+    mod:
+    if mod == "ALT" then
+      "WLR_MODIFIER_ALT"
+    else if mod == "SUPER" then
+      "WLR_MODIFIER_LOGO"
+    else if mod == "CTRL" then
+      "WLR_MODIFIER_CTRL"
+    else
+      throw ''Invalid mod key: "${mod}". Valid: ALT, SUPER, CTRL'';
 
   layoutFunctionMap = {
     tile = "tile";
     floating = "NULL";
     monocle = "monocle";
   };
-
   layoutOrder = [
     "tile"
     "floating"
     "monocle"
   ];
 
+  getEnabledLayoutNames =
+    layouts: builtins.filter (name: layouts.${name}.enable or false) layoutOrder;
+
+  getLayoutIndex =
+    layouts: layoutName:
+    let
+      enabledLayouts = getEnabledLayoutNames layouts;
+      filtered = builtins.filter (x: x != null) (
+        lib.imap0 (i: n: if n == layoutName then i else null) enabledLayouts
+      );
+    in
+    if filtered == [ ] then
+      throw ''Layout "${layoutName}" not found or not enabled.''
+    else
+      builtins.head filtered;
+
   formatLayouts =
     layouts:
     let
       formatLayout =
         name:
-        if (layouts.${name}.enable or false) then
-          let
-            cfg = layouts.${name};
-            func =
-              layoutFunctionMap.${name} or (throw ''
-                Unknown layout: "${name}"
-                Valid layouts: ${lib.concatStringsSep ", " (lib.attrNames layoutFunctionMap)}
-              '');
-          in
-          ''{ "${cfg.symbol}", ${func} }''
+        if layouts.${name}.enable or false then
+          ''{ "${layouts.${name}.symbol}", ${
+            layoutFunctionMap.${name} or (throw "Unknown layout: ${name}")
+          } }''
         else
           null;
-
-      formattedLayouts = builtins.filter (x: x != null) (map formatLayout layoutOrder);
+      result = builtins.filter (x: x != null) (map formatLayout layoutOrder);
     in
-    if formattedLayouts == [ ] then
+    if result == [ ] then
       throw "At least one layout must be enabled"
     else
-      lib.concatStringsSep ",\n\t" formattedLayouts;
+      lib.concatStringsSep ",\n    " result;
 
   formatWindowRules =
     rules:
@@ -597,9 +625,7 @@ let
           terminal = rule.terminal or false;
           no_swallow = rule.no_swallow or false;
           monitor = rule.monitor or (-1);
-
-          formatStr = s: if s == null then "NULL" else ''"${s}"'';
-
+          fmt = s: if s == null then "NULL" else ''"${s}"'';
           tagsMask =
             if workspace == null then
               "0"
@@ -607,19 +633,12 @@ let
               let
                 num = if builtins.isString workspace then lib.toInt workspace else workspace;
               in
-              if num >= 1 && num <= 9 then
-                "1 << ${toString (num - 1)}"
-              else
-                throw "workspace must be between 1 and 9, got ${toString num}";
+              if num >= 1 && num <= 9 then "1 << ${toString (num - 1)}" else throw "workspace must be 1-9";
         in
-        ''{ ${formatStr app_id}, ${formatStr title}, ${tagsMask}, ${toString (boolToInt floating)}, ${toString (boolToInt terminal)}, ${toString (boolToInt no_swallow)}, ${toString monitor} }'';
-
-      formattedRules = map formatRule rules;
+        "{ ${fmt app_id}, ${fmt title}, ${tagsMask}, ${toString (boolToInt floating)}, ${toString (boolToInt terminal)}, ${toString (boolToInt no_swallow)}, ${toString monitor} }";
+      result = map formatRule rules;
     in
-    if formattedRules == [ ] then
-      ''{ NULL, NULL, 0, 0, 0, 0, -1 }''
-    else
-      lib.concatStringsSep ",\n\t" formattedRules;
+    if result == [ ] then "{ NULL, NULL, 0, 0, 0, 0, -1 }" else lib.concatStringsSep ",\n    " result;
 
   transformMap = {
     "normal" = "WL_OUTPUT_TRANSFORM_NORMAL";
@@ -631,31 +650,7 @@ let
     "flipped_180" = "WL_OUTPUT_TRANSFORM_FLIPPED_180";
     "flipped_270" = "WL_OUTPUT_TRANSFORM_FLIPPED_270";
   };
-
   mapTransform = mapEnum "transform" transformMap;
-
-  getEnabledLayoutNames =
-    layouts: builtins.filter (name: layouts.${name}.enable or false) layoutOrder;
-
-  getLayoutIndex =
-    layouts: layoutName:
-    let
-      enabledLayouts = getEnabledLayoutNames layouts;
-      findIndex =
-        list: name:
-        let
-          indices = lib.imap0 (i: n: if n == name then i else null) list;
-          filtered = builtins.filter (x: x != null) indices;
-        in
-        if filtered == [ ] then
-          throw ''
-            Layout "${name}" not found or not enabled.
-            Enabled layouts: ${lib.concatStringsSep ", " enabledLayouts}
-          ''
-        else
-          builtins.head filtered;
-    in
-    findIndex enabledLayouts layoutName;
 
   formatMonitorRules =
     monitors: layouts:
@@ -664,20 +659,19 @@ let
         mon:
         let
           name = mon.name or null;
-          master_factor = mon.master_factor or 0.55;
+          master_factor = mon.master_factor or cfg.general.master_factor or 0.55;
           master_count = mon.master_count or 1;
           scale = mon.scale or 1;
           default_layout = mon.default_layout or "tile";
           transform = mon.transform or "normal";
           position = mon.position or "auto";
-
+          resx = mon.resx or 0;
+          resy = mon.resy or 0;
+          rate = mon.rate or 0.0;
+          mode = mon.mode or 0;
+          adaptive = mon.adaptive or true;
           nameStr = if name == null then "NULL" else ''"${name}"'';
-
-          layoutIdx = getLayoutIndex layouts default_layout;
-          layoutRef = "&layouts[${toString layoutIdx}]";
-
-          transformEnum = mapTransform transform;
-
+          layoutRef = "&layouts[${toString (getLayoutIndex layouts default_layout)}]";
           pos =
             if position == "auto" then
               {
@@ -692,66 +686,50 @@ let
             else
               throw "position must be 'auto' or { x = ...; y = ...; }";
         in
-        ''{ ${nameStr}, ${toString master_factor}f, ${toString master_count}, ${toString scale}, ${layoutRef}, ${transformEnum}, ${toString pos.x}, ${toString pos.y} }'';
-
-      formattedMonitors = map formatMonitor monitors;
+        "{ ${nameStr}, ${toString master_factor}f, ${toString master_count}, ${toString scale}, ${layoutRef}, ${mapTransform transform}, ${toString pos.x}, ${toString pos.y}, ${toString resx}, ${toString resy}, ${toString rate}f, ${toString mode}, ${toString (boolToInt adaptive)} }";
+      result = map formatMonitor monitors;
     in
-    if formattedMonitors == [ ] then
+    if result == [ ] then
       throw "At least one monitor rule must be defined"
     else
-      lib.concatStringsSep ",\n\t" formattedMonitors;
+      lib.concatStringsSep ",\n    " result;
 
-  sanitizeCommandName =
-    cmd:
-    let
-      hash = builtins.hashString "sha256" cmd;
-      shortHash = builtins.substring 0 16 hash;
-    in
-    "cmd_${shortHash}";
+  sanitizeCommandName = cmd: "cmd_${builtins.substring 0 16 (builtins.hashString "sha256" cmd)}";
 
   extractSpawnCommands =
-    keys: mouse:
+    keys: mouse: lib.unique (map (b: b.arg) (builtins.filter (b: b.action == "spawn") (keys ++ mouse)));
+
+  formatCommands =
+    commands:
     let
-      keySpawns = builtins.filter (bind: bind.action == "spawn") keys;
-      mouseSpawns = builtins.filter (bind: bind.action == "spawn") mouse;
-      allSpawns = keySpawns ++ mouseSpawns;
-      commands = map (bind: bind.arg) allSpawns;
-      unique = lib.unique commands;
+      formatCmd =
+        cmd:
+        let
+          varName = sanitizeCommandName cmd;
+          needsShell = builtins.any (op: lib.hasInfix op cmd) [
+            "&&"
+            "||"
+            "|"
+            ">"
+            "<"
+            ";"
+            "$"
+            "`"
+          ];
+        in
+        if needsShell then
+          let
+            escapedCmd = lib.escape [ "\\" ''"'' ] cmd;
+          in
+          ''static const char *${varName}[] = { "/bin/sh", "-c", "${escapedCmd}", NULL };''
+        else
+          let
+            parts = lib.splitString " " cmd;
+            quoted = map (s: ''"${lib.escape [ "\\" ''"'' ] s}"'') parts;
+          in
+          "static const char *${varName}[] = { ${lib.concatStringsSep ", " quoted}, NULL };";
     in
-    unique;
-
-formatCommands =
-  commands:
-  let
-    formatCmd =
-      cmd:
-      let
-        varName = sanitizeCommandName cmd;
-        # Check if command contains shell operators
-        needsShell = builtins.any (op: lib.hasInfix op cmd) ["&&" "||" "|" ">" "<" ";" "$" "`"];
-        
-        formattedCmd = 
-          if needsShell then
-            # Wrap in shell for commands with shell operators
-            let
-              escapedCmd = lib.escape ["\\" ''"''] cmd;
-            in
-            ''static const char *${varName}[] = { "/bin/sh", "-c", "${escapedCmd}", NULL };''
-          else
-            # Direct execution for simple commands
-            let
-              parts = lib.splitString " " cmd;
-              escaped = map (s: lib.escape ["\\" ''"''] s) parts;
-              quoted = map (s: ''"${s}"'') escaped;
-              argv = lib.concatStringsSep ", " quoted;
-            in
-            ''static const char *${varName}[] = { ${argv}, NULL };'';
-      in
-      formattedCmd;
-
-    formatted = map formatCmd commands;
-  in
-  lib.concatStringsSep "\n" formatted;
+    lib.concatStringsSep "\n" (map formatCmd commands);
 
   buildCommandLookup =
     commands:
@@ -771,7 +749,6 @@ formatCommands =
   };
 
   keyMap = {
-    # Letters (lowercase)
     a = "XKB_KEY_a";
     b = "XKB_KEY_b";
     c = "XKB_KEY_c";
@@ -798,8 +775,6 @@ formatCommands =
     x = "XKB_KEY_x";
     y = "XKB_KEY_y";
     z = "XKB_KEY_z";
-
-    # Letters (uppercase)
     A = "XKB_KEY_A";
     B = "XKB_KEY_B";
     C = "XKB_KEY_C";
@@ -826,8 +801,6 @@ formatCommands =
     X = "XKB_KEY_X";
     Y = "XKB_KEY_Y";
     Z = "XKB_KEY_Z";
-
-    # Numbers
     "0" = "XKB_KEY_0";
     "1" = "XKB_KEY_1";
     "2" = "XKB_KEY_2";
@@ -838,8 +811,6 @@ formatCommands =
     "7" = "XKB_KEY_7";
     "8" = "XKB_KEY_8";
     "9" = "XKB_KEY_9";
-
-    # Special keys
     space = "XKB_KEY_space";
     return = "XKB_KEY_Return";
     enter = "XKB_KEY_Return";
@@ -853,14 +824,10 @@ formatCommands =
     end = "XKB_KEY_End";
     pageup = "XKB_KEY_Page_Up";
     pagedown = "XKB_KEY_Page_Down";
-
-    # Arrow keys
     left = "XKB_KEY_Left";
     right = "XKB_KEY_Right";
     up = "XKB_KEY_Up";
     down = "XKB_KEY_Down";
-
-    # Punctuation (base)
     comma = "XKB_KEY_comma";
     period = "XKB_KEY_period";
     slash = "XKB_KEY_slash";
@@ -872,8 +839,6 @@ formatCommands =
     equal = "XKB_KEY_equal";
     bracketleft = "XKB_KEY_bracketleft";
     bracketright = "XKB_KEY_bracketright";
-
-    # Punctuation (shifted) - so you can write mod+less directly
     less = "XKB_KEY_less";
     greater = "XKB_KEY_greater";
     question = "XKB_KEY_question";
@@ -895,8 +860,6 @@ formatCommands =
     asterisk = "XKB_KEY_asterisk";
     parenleft = "XKB_KEY_parenleft";
     parenright = "XKB_KEY_parenright";
-
-    # Function keys
     f1 = "XKB_KEY_F1";
     f2 = "XKB_KEY_F2";
     f3 = "XKB_KEY_F3";
@@ -909,8 +872,6 @@ formatCommands =
     f10 = "XKB_KEY_F10";
     f11 = "XKB_KEY_F11";
     f12 = "XKB_KEY_F12";
-
-    # Media keys
     audioplay = "XKB_KEY_XF86AudioPlay";
     audiopause = "XKB_KEY_XF86AudioPause";
     audioplaypause = "XKB_KEY_XF86AudioPlay";
@@ -935,24 +896,12 @@ formatCommands =
     mail = "XKB_KEY_XF86Mail";
     homepage = "XKB_KEY_XF86HomePage";
     search = "XKB_KEY_XF86Search";
-    favorites = "XKB_KEY_XF86Favorites";
     display = "XKB_KEY_XF86Display";
-    touchpadtoggle = "XKB_KEY_XF86TouchpadToggle";
-    touchpadon = "XKB_KEY_XF86TouchpadOn";
-    touchpadoff = "XKB_KEY_XF86TouchpadOff";
-    kbdbrightnessdown = "XKB_KEY_XF86KbdBrightnessDown";
-    kbdbrightnessup = "XKB_KEY_XF86KbdBrightnessUp";
     sleep = "XKB_KEY_XF86Sleep";
     wakeup = "XKB_KEY_XF86WakeUp";
-    poweroff = "XKB_KEY_XF86PowerOff";
-    wlan = "XKB_KEY_XF86WLAN";
-    tools = "XKB_KEY_XF86Tools";
-    battery = "XKB_KEY_XF86Battery";
-    bluetooth = "XKB_KEY_XF86Bluetooth";
     micmute = "XKB_KEY_XF86AudioMicMute";
   };
 
-  # Shifted key mapping (for TAGKEYS compatibility)
   shiftedKeyMap = {
     "1" = "XKB_KEY_exclam";
     "2" = "XKB_KEY_at";
@@ -1022,7 +971,6 @@ formatCommands =
       func = "setlayout";
       argType = "none";
     };
-
     focusstack = {
       func = "focusstack";
       argType = "int";
@@ -1068,25 +1016,21 @@ formatCommands =
       argType = "int";
       unionField = "i";
     };
-
     setmfact = {
       func = "setmfact";
       argType = "float";
       unionField = "f";
     };
-
     spawn = {
       func = "spawn";
       argType = "command";
       unionField = "v";
     };
-
     setlayout = {
       func = "setlayout";
       argType = "layout";
       unionField = "v";
     };
-
     focusmon = {
       func = "focusmon";
       argType = "direction";
@@ -1097,7 +1041,6 @@ formatCommands =
       argType = "direction";
       unionField = "i";
     };
-
     view = {
       func = "view";
       argType = "tag";
@@ -1118,7 +1061,6 @@ formatCommands =
       argType = "tag";
       unionField = "ui";
     };
-
     viewall = {
       func = "view";
       argType = "allTags";
@@ -1142,18 +1084,15 @@ formatCommands =
     up = "WLR_DIRECTION_UP";
     down = "WLR_DIRECTION_DOWN";
   };
-
   cursorModeMap = {
     move = "CurMove";
     resize = "CurResize";
   };
-
   buttonMap = {
     left = "BTN_LEFT";
     middle = "BTN_MIDDLE";
     right = "BTN_RIGHT";
   };
-
   targetMap = {
     layout_symbol = "ClkLtSymbol";
     title = "ClkTitle";
@@ -1169,7 +1108,6 @@ formatCommands =
       key = lib.last parts;
       modParts = lib.init parts;
       hasShift = builtins.elem "shift" modParts;
-
       mapMod =
         m:
         if m == "mod" then
@@ -1177,32 +1115,21 @@ formatCommands =
         else if modifierMap ? ${m} then
           modifierMap.${m}
         else
-          throw ''Unknown modifier: "${m}". Valid: mod, shift, ctrl, alt, super'';
-
-      mappedMods = map mapMod modParts;
-      modString = if mappedMods == [ ] then "0" else lib.concatStringsSep "|" mappedMods;
-
-      # Check if key is a single letter
+          throw ''Unknown modifier: "${m}"'';
+      modString =
+        let
+          mm = map mapMod modParts;
+        in
+        if mm == [ ] then "0" else lib.concatStringsSep "|" mm;
       isLetter = builtins.stringLength key == 1 && builtins.match "[a-z]" key != null;
-
-      # Convert to uppercase if it's a letter
       upperKey = if isLetter then lib.toUpper key else key;
-
       mappedKey =
-        # For letters with shift: use uppercase XKB key
         if hasShift && isLetter then
           keyMap.${upperKey} or (throw ''Unknown key: "${upperKey}"'')
-        # For numbers with shift: use shifted symbol
         else if hasShift && shiftedKeyMap ? ${key} then
           shiftedKeyMap.${key}
-        # Normal mapping
-        else if keyMap ? ${key} then
-          keyMap.${key}
         else
-          throw ''
-            Unknown key: "${key}"
-            Common keys: a-z, 0-9, space, return, tab, escape, comma, period, etc.
-          '';
+          keyMap.${key} or (throw ''Unknown key: "${key}"'');
     in
     {
       modifier = modString;
@@ -1212,9 +1139,8 @@ formatCommands =
   formatArg =
     action: arg: commandLookup: layouts:
     let
-      actionInfo = actionTypeMap.${action} or (throw ''Unknown action: "${action}"'');
-
-      argType = actionInfo.argType;
+      info = actionTypeMap.${action} or (throw ''Unknown action: "${action}"'');
+      argType = info.argType;
     in
     if argType == "none" then
       "{0}"
@@ -1223,268 +1149,172 @@ formatCommands =
     else if argType == "float" then
       "{.f = ${toString arg}f}"
     else if argType == "command" then
-      let
-        cmdVar = commandLookup.${arg} or (throw ''Command "${arg}" not found in command lookup'');
-      in
-      "{.v = ${cmdVar}}"
+      "{.v = ${commandLookup.${arg} or (throw "Command not found: ${arg}")}}"
     else if argType == "layout" then
-      let
-        layoutIdx = getLayoutIndex layouts arg;
-      in
-      "{.v = &layouts[${toString layoutIdx}]}"
+      "{.v = &layouts[${toString (getLayoutIndex layouts arg)}]}"
     else if argType == "direction" then
-      let
-        dir = directionMap.${arg} or (throw ''Unknown direction: "${arg}". Valid: left, right, up, down'');
-      in
-      "{.i = ${dir}}"
+      "{.i = ${directionMap.${arg} or (throw "Unknown direction: ${arg}")}}"
     else if argType == "cursorMode" then
-      let
-        mode = cursorModeMap.${arg} or (throw ''Unknown cursor mode: "${arg}". Valid: move, resize'');
-      in
-      "{.ui = ${mode}}"
+      "{.ui = ${cursorModeMap.${arg} or (throw "Unknown cursor mode: ${arg}")}}"
     else if argType == "tag" then
       if builtins.isInt arg then
         "{.ui = 1 << ${toString (arg - 1)}}"
       else if arg == null then
         "{0}"
       else
-        throw ''Tag operation "${action}" expects numeric argument (1-9) or null''
+        throw "Tag expects int or null"
     else if argType == "allTags" then
       "{.ui = ~0}"
     else
-      throw ''Unknown argument type: ${argType}'';
+      throw "Unknown argType: ${argType}";
 
   formatKeybindings =
     keys: mod: commandLookup: layouts:
-    let
-      formatKey =
+    lib.concatStringsSep ",\n    " (
+      map (
         bind:
         let
-          parsed = parseBind bind.bind mod;
-          action = bind.action;
-          arg = bind.arg or null;
-          actionInfo = actionTypeMap.${action};
-          argFormatted = formatArg action arg commandLookup layouts;
+          p = parseBind bind.bind mod;
+          i = actionTypeMap.${bind.action};
         in
-        ''{ ${parsed.modifier}, ${parsed.key}, ${actionInfo.func}, ${argFormatted} }'';
-
-      formatted = map formatKey keys;
-    in
-    lib.concatStringsSep ",\n\t" formatted;
+        "{ ${p.modifier}, ${p.key}, ${i.func}, ${
+          formatArg bind.action (bind.arg or null) commandLookup layouts
+        } }"
+      ) keys
+    );
 
   formatMouseBindings =
     mouse: mod: commandLookup: layouts:
-    let
-      formatMouse =
+    lib.concatStringsSep ",\n    " (
+      map (
         bind:
         let
           parts = lib.splitString "+" bind.bind;
-          button = lib.last parts;
-          modParts = lib.init parts;
-
-          mappedButton =
-            buttonMap.${button} or (throw ''Unknown button: "${button}". Valid: left, middle, right'');
-
-          mapMod =
-            m:
-            if m == "mod" then
-              "MODKEY"
-            else if modifierMap ? ${m} then
-              modifierMap.${m}
-            else
-              throw ''Unknown modifier: "${m}"'';
-
-          mappedMods = map mapMod modParts;
-          modString = if mappedMods == [ ] then "0" else lib.concatStringsSep "|" mappedMods;
-
-          target = bind.target or "client";
-          mappedTarget =
-            targetMap.${target}
-              or (throw ''Unknown target: "${target}". Valid: layout_symbol, title, status, client, tagbar'');
-
-          action = bind.action;
-          arg = bind.arg or null;
-          actionInfo = actionTypeMap.${action};
-          argFormatted = formatArg action arg commandLookup layouts;
+          btn = lib.last parts;
+          mParts = lib.init parts;
+          mappedBtn = buttonMap.${btn} or (throw "Unknown button: ${btn}");
+          mapMod = m: if m == "mod" then "MODKEY" else modifierMap.${m} or (throw "Unknown modifier: ${m}");
+          modString =
+            let
+              mm = map mapMod mParts;
+            in
+            if mm == [ ] then "0" else lib.concatStringsSep "|" mm;
+          mappedTarget = targetMap.${bind.target or "client"} or (throw "Unknown target");
+          i = actionTypeMap.${bind.action};
         in
-        ''{ ${mappedTarget}, ${modString}, ${mappedButton}, ${actionInfo.func}, ${argFormatted} }'';
+        "{ ${mappedTarget}, ${modString}, ${mappedBtn}, ${i.func}, ${
+          formatArg bind.action (bind.arg or null) commandLookup layouts
+        } }"
+      ) mouse
+    );
 
-      formatted = map formatMouse mouse;
+  generateConfig =
+    let
+      commands = extractSpawnCommands cfg.bindings.keys cfg.bindings.mouse;
+      commandLookup = buildCommandLookup commands;
     in
-    lib.concatStringsSep ",\n\t" formatted;
+    ''
+      #define COLOR(hex) { \
+          ((hex >> 24) & 0xFF) / 255.0f, ((hex >> 16) & 0xFF) / 255.0f, \
+          ((hex >> 8)  & 0xFF) / 255.0f, (hex & 0xFF)         / 255.0f }
 
-  mapModkey =
-    mod:
-    if mod == "ALT" then
-      "WLR_MODIFIER_ALT"
-    else if mod == "SUPER" then
-      "WLR_MODIFIER_LOGO"
-    else if mod == "CTRL" then
-      "WLR_MODIFIER_CTRL"
-    else
-      throw ''Invalid mod key: "${mod}". Valid: ALT, SUPER'';
+      static const int          tabletmaptosurface        = ${formatValue cfg.input.tablet.map_to_surface};
+      static const int          sloppyfocus               = ${formatValue cfg.general.focus_follows_mouse};
+      static const int          bypass_surface_visibility = ${formatValue cfg.advanced.idle_inhibit_visible_only};
+      static const int          smartborders              = ${formatValue cfg.general.smart_borders};
+      static const int          smartgaps                 = ${formatValue (getGapBool cfg.appearance.gaps cfg.general.smart_gaps)};
+      static const int          monoclegaps               = ${formatValue (getGapBool cfg.appearance.gaps cfg.appearance.gaps.monocle)};
+      static const unsigned int gappih                    = ${formatValue (getGapValue cfg.appearance.gaps cfg.appearance.gaps.inner.horizontal)};
+      static const unsigned int gappiv                    = ${formatValue (getGapValue cfg.appearance.gaps cfg.appearance.gaps.inner.vertical)};
+      static const unsigned int gappoh                    = ${formatValue (getGapValue cfg.appearance.gaps cfg.appearance.gaps.outer.horizontal)};
+      static const unsigned int gappov                    = ${formatValue (getGapValue cfg.appearance.gaps cfg.appearance.gaps.outer.vertical)};
+      static const unsigned int borderpx                  = ${formatValue cfg.general.border_width};
+      static const int          showbar                   = ${formatValue cfg.appearance.bar.enable};
+      static const int          topbar                    = ${formatValue cfg.appearance.bar.position_top};
+      static const int          vertpad                   = ${formatValue cfg.appearance.bar.padding.vertical};
+      static const int          sidepad                   = ${formatValue cfg.appearance.bar.padding.horizontal};
+      static const char        *fonts[]                   = { ${formatStringArray cfg.appearance.fonts} };
+      static const float        rootcolor[]               = COLOR(${hexToColorMacro cfg.appearance.colors.root});
+      static const float        fullscreen_bg[]           = COLOR(${hexToColorMacro cfg.appearance.colors.fullscreen});
+      static int                enableautoswallow         = ${formatValue cfg.windows.swallow.enable};
+      static float              swallowborder             = ${formatValue cfg.windows.swallow.border_multiplier};
 
-  logLevelMap = {
-    "silent" = "WLR_SILENT";
-    "error" = "WLR_ERROR";
-    "info" = "WLR_INFO";
-    "debug" = "WLR_DEBUG";
-  };
+      static uint32_t colors[][3] = {
+          ${formatColorScheme cfg.appearance.colors}
+      };
 
-  mapLogLevel = mapEnum "log_level" logLevelMap;
-  mapSendEvents = mapEnum "send_events_mode" sendEventsMap;
+      static char *tags[] = { ${formatStringArray cfg.workspaces.tags} };
 
-  generateConfig = ''
-    #define COLOR(hex)    { ((hex >> 24) & 0xFF) / 255.0f, \
-                            ((hex >> 16) & 0xFF) / 255.0f, \
-                            ((hex >> 8) & 0xFF) / 255.0f, \
-                            (hex & 0xFF) / 255.0f }
+      static int log_level = ${mapLogLevel cfg.advanced.log_level};
 
-    /* General window behavior */
-    static const int sloppyfocus = ${formatValue cfg.general.focus_follows_mouse};
-    static const int bypass_surface_visibility = ${formatValue cfg.advanced.idle_inhibit_visible_only};
-    static const int smartborders = ${formatValue cfg.general.smart_borders};
-    static const int smartgaps = ${formatValue (getGapBool cfg.appearance.gaps cfg.general.smart_gaps)};
-    static const int monoclegaps = ${formatValue (getGapBool cfg.appearance.gaps cfg.appearance.gaps.monocle)};
-    static const unsigned int borderpx = ${formatValue cfg.general.border_width};
+      static const Env envs[] = {
+          ${formatEnvVars cfg.environment}
+      };
 
-    /* Bar appearance */
-    static const int showbar = ${formatValue cfg.appearance.bar.enable};
-    static const int topbar = ${formatValue cfg.appearance.bar.position_top};
-    static const int barvertpad = ${formatValue cfg.appearance.bar.margin.vertical};
-    static const int barhorzpad = ${formatValue cfg.appearance.bar.margin.horizontal};
-    static const int vertpad = ${formatValue cfg.appearance.bar.padding.vertical};
-    static const int sidepad = ${formatValue cfg.appearance.bar.padding.horizontal};
+      static const char *const autostart[] = {
+          ${formatAutostart cfg.autostart}
+      };
 
-    /* Fonts */
-    static const char *fonts[] = {${formatStringArray cfg.appearance.fonts}};
+      static const Rule rules[] = {
+          ${formatWindowRules cfg.windows.rules}
+      };
 
-    /* Colors */
-    static const float rootcolor[] = COLOR(${hexToColorMacro cfg.appearance.colors.root});
+      static const Layout layouts[] = {
+          ${formatLayouts cfg.layouts}
+      };
 
-    /* Gaps */
-    static const unsigned int gappih = ${formatValue (getGapValue cfg.appearance.gaps cfg.appearance.gaps.inner.horizontal)};
-    static const unsigned int gappiv = ${formatValue (getGapValue cfg.appearance.gaps cfg.appearance.gaps.inner.vertical)};
-    static const unsigned int gappoh = ${formatValue (getGapValue cfg.appearance.gaps cfg.appearance.gaps.outer.horizontal)};
-    static const unsigned int gappov = ${formatValue (getGapValue cfg.appearance.gaps cfg.appearance.gaps.outer.vertical)};
+      static const MonitorRule monrules[] = {
+          ${formatMonitorRules cfg.monitors cfg.layouts}
+      };
 
-    /* Fullscreen background */
-    static const float fullscreen_bg[] = COLOR(${hexToColorMacro cfg.appearance.colors.fullscreen});
+      static const struct xkb_rule_names xkb_rules = ${formatXkbRules cfg.input.keyboard};
 
-    /* Color schemes */
-    static uint32_t colors[][3] = {
-      ${formatColorScheme cfg.appearance.colors}
-    };
+      static const int repeat_rate  = ${formatValue cfg.input.keyboard.repeat_rate};
+      static const int repeat_delay = ${formatValue cfg.input.keyboard.repeat_delay};
 
-    /* Window swallowing */
-    static int enableautoswallow = ${formatValue cfg.windows.swallow.enable};
-    static float swallowborder = ${formatValue cfg.windows.swallow.border_multiplier};
+      static const int tap_to_click            = ${formatValue cfg.input.touchpad.tap_to_click};
+      static const int tap_and_drag            = ${formatValue cfg.input.touchpad.tap_and_drag};
+      static const int drag_lock               = ${formatValue cfg.input.touchpad.drag_lock};
+      static const int natural_scrolling       = ${formatValue cfg.input.touchpad.natural_scrolling};
+      static const int disable_while_typing    = ${formatValue cfg.input.touchpad.disable_while_typing};
+      static const int left_handed             = ${formatValue cfg.input.touchpad.left_handed};
+      static const int middle_button_emulation = ${formatValue cfg.input.touchpad.middle_emulation};
 
-    /* Tags */
-    static char *tags[] = { ${formatStringArray cfg.workspaces.tags} };
+      static const enum libinput_config_scroll_method   scroll_method    = ${mapScrollMethod cfg.input.touchpad.scroll_method};
+      static const enum libinput_config_click_method    click_method     = ${mapClickMethod cfg.input.touchpad.click_method};
+      static const uint32_t                             send_events_mode = ${mapSendEvents cfg.advanced.send_events_mode};
+      static const enum libinput_config_accel_profile   accel_profile    = ${mapAccelProfile cfg.input.touchpad.accel_profile};
+      static const double                               accel_speed      = ${toString cfg.input.touchpad.accel_speed};
+      static const enum libinput_config_tap_button_map  button_map       = ${mapButtonMap cfg.input.touchpad.button_map};
 
-    /* Logging */
-    static int log_level = ${mapLogLevel cfg.advanced.log_level};
+      #define MODKEY ${mapModkey cfg.bindings.mod}
 
-    /* Environment variables */
-    static const Env envs[] = {
-      ${formatEnvVars cfg.environment}
-    };
+      #define TAGKEYS(KEY, SKEY, TAG) \
+          { MODKEY,                                      KEY,  view,       {.ui = 1 << TAG} }, \
+          { MODKEY|WLR_MODIFIER_CTRL,                    KEY,  toggleview, {.ui = 1 << TAG} }, \
+          { MODKEY|WLR_MODIFIER_SHIFT,                   SKEY, tag,        {.ui = 1 << TAG} }, \
+          { MODKEY|WLR_MODIFIER_CTRL|WLR_MODIFIER_SHIFT, SKEY, toggletag,  {.ui = 1 << TAG} }
 
-    /* Autostart */
-    static const char *const autostart[] = {
-      ${formatAutostart cfg.autostart}
-    };
+      #define SHCMD(cmd) { .v = (const char*[]){ "/bin/sh", "-c", cmd, NULL } }
 
-    /* Window rules */
-    static const Rule rules[] = {
-      ${formatWindowRules cfg.windows.rules}
-    };
+      ${formatCommands commands}
 
-    /* Layouts */
-    static const Layout layouts[] = {
-      ${formatLayouts cfg.layouts}
-    };
+      static const Key keys[] = {
+          ${formatKeybindings cfg.bindings.keys cfg.bindings.mod commandLookup cfg.layouts},
+          { WLR_MODIFIER_CTRL|WLR_MODIFIER_ALT, XKB_KEY_Terminate_Server, quit, {0} },
+      #define CHVT(n) { WLR_MODIFIER_CTRL|WLR_MODIFIER_ALT, XKB_KEY_XF86Switch_VT_##n, chvt, {.ui = (n)} }
+          CHVT(1), CHVT(2), CHVT(3), CHVT(4),  CHVT(5),  CHVT(6),
+          CHVT(7), CHVT(8), CHVT(9), CHVT(10), CHVT(11), CHVT(12),
+      };
 
-    /* Monitor rules */
-    static const MonitorRule monrules[] = {
-      ${formatMonitorRules cfg.monitors cfg.layouts}
-    };
-
-    /* Keyboard configuration */
-    static const struct xkb_rule_names xkb_rules = {${formatXkbRules cfg.input.keyboard}
-    };
-
-    /* Keyboard repeat */
-    static const int repeat_rate = ${formatValue cfg.input.keyboard.repeat_rate};
-    static const int repeat_delay = ${formatValue cfg.input.keyboard.repeat_delay};
-
-    /* Touchpad configuration */
-    static const int tap_to_click = ${formatValue cfg.input.touchpad.tap_to_click};
-    static const int tap_and_drag = ${formatValue cfg.input.touchpad.tap_and_drag};
-    static const int drag_lock = ${formatValue cfg.input.touchpad.drag_lock};
-    static const int natural_scrolling = ${formatValue cfg.input.touchpad.natural_scrolling};
-    static const int disable_while_typing = ${formatValue cfg.input.touchpad.disable_while_typing};
-    static const int left_handed = ${formatValue cfg.input.touchpad.left_handed};
-    static const int middle_button_emulation = ${formatValue cfg.input.touchpad.middle_emulation};
-
-    /* Touchpad enums */
-    static const enum libinput_config_scroll_method scroll_method = ${mapScrollMethod cfg.input.touchpad.scroll_method};
-    static const enum libinput_config_click_method click_method = ${mapClickMethod cfg.input.touchpad.click_method};
-    static const uint32_t send_events_mode = ${mapSendEvents cfg.advanced.send_events_mode};
-    static const enum libinput_config_accel_profile accel_profile = ${mapAccelProfile cfg.input.touchpad.accel_profile};
-    static const double accel_speed = ${formatValue cfg.input.touchpad.accel_speed};
-    static const enum libinput_config_tap_button_map button_map = ${mapButtonMap cfg.input.touchpad.button_map};
-
-    /* Modifier key */
-    #define MODKEY ${mapModkey cfg.bindings.mod}
-
-    #define TAGKEYS(KEY,SKEY,TAG) \
-      { MODKEY,                    KEY,            view,            {.ui = 1 << TAG} }, \
-      { MODKEY|WLR_MODIFIER_CTRL,  KEY,            toggleview,      {.ui = 1 << TAG} }, \
-      { MODKEY|WLR_MODIFIER_SHIFT, SKEY,           tag,             {.ui = 1 << TAG} }, \
-      { MODKEY|WLR_MODIFIER_CTRL|WLR_MODIFIER_SHIFT,SKEY,toggletag, {.ui = 1 << TAG} }
-
-    #define SHCMD(cmd) { .v = (const char*[]){ "/bin/sh", "-c", cmd, NULL } }
-
-    /* Commands */
-    ${
-      let
-        commands = extractSpawnCommands cfg.bindings.keys cfg.bindings.mouse;
-      in
-      formatCommands commands
-    }
-
-    /* Keybindings */
-    static const Key keys[] = {
-      ${
-        let
-          commands = extractSpawnCommands cfg.bindings.keys cfg.bindings.mouse;
-          commandLookup = buildCommandLookup commands;
-        in
-        formatKeybindings cfg.bindings.keys cfg.bindings.mod commandLookup cfg.layouts
-      },
-      { WLR_MODIFIER_CTRL|WLR_MODIFIER_ALT,XKB_KEY_Terminate_Server, quit, {0} },
-    #define CHVT(n) { WLR_MODIFIER_CTRL|WLR_MODIFIER_ALT,XKB_KEY_XF86Switch_VT_##n, chvt, {.ui = (n)} }
-      CHVT(1), CHVT(2), CHVT(3), CHVT(4), CHVT(5), CHVT(6),
-      CHVT(7), CHVT(8), CHVT(9), CHVT(10), CHVT(11), CHVT(12),
-    };
-
-    /* Mouse bindings */
-    static const Button buttons[] = {
-      ${
-        let
-          commands = extractSpawnCommands cfg.bindings.keys cfg.bindings.mouse;
-          commandLookup = buildCommandLookup commands;
-        in
-        formatMouseBindings cfg.bindings.mouse cfg.bindings.mod commandLookup cfg.layouts
-      }
-    };
-  '';
+      static const Button buttons[] = {
+          ${formatMouseBindings cfg.bindings.mouse cfg.bindings.mod commandLookup cfg.layouts}
+      };
+    '';
 in
 pkgs.stdenv.mkDerivation {
   pname = "dwl";
-  version = "0.7";
+  version = "0.8";
   src = ./.;
   nativeBuildInputs = with pkgs; [
     pkg-config
@@ -1498,9 +1328,9 @@ pkgs.stdenv.mkDerivation {
     pixman
     wayland
     wayland-protocols
-    wlroots_0_18
-    xorg.libxcb
-    xorg.xcbutilwm
+    wlroots_0_19
+    libxcb
+    xcbutilwm
     xwayland
   ];
   preBuild = ''
@@ -1509,12 +1339,10 @@ pkgs.stdenv.mkDerivation {
     EOF
     cp config.def.h config.h
   '';
-
   postInstall = ''
     mkdir -p $out/share/dwl
     cp config.def.h $out/
   '';
-
   makeFlags = [ "PREFIX=$(out)" ];
   meta = with pkgs.lib; {
     description = "dwm for Wayland";
