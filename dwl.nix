@@ -29,7 +29,7 @@ let
           vertical = 0;
         };
         padding = {
-          vertical = 5;
+          vertical = 4;
           horizontal = 0;
         };
       };
