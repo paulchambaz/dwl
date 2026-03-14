@@ -588,8 +588,14 @@ applyrules(Client *c)
 		}
 	}
 
-	c->isfloating |= client_is_float_type(c);
-	setmon(c, mon, newtags);
+  c->isfloating |= client_is_float_type(c);
+  if (enableautoswallow && !c->noswallow && !c->isfloating &&
+    !c->surface.xdg->initial_commit) {
+    Client *p = termforwin(c);
+    if (p)
+      swallow(c, p);
+  }
+  setmon(c, mon, newtags);
 }
 
 void
