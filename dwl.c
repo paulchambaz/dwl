@@ -3359,6 +3359,7 @@ tabletapplymap(double x, double y, struct wlr_input_device *dev)
 		}
 	}
 	wlr_cursor_map_input_to_region(cursor, dev, &geom);
+  wlr_cursor_map_input_to_output(cursor, dev, NULL);
 }
 
 void
