@@ -28,6 +28,10 @@ let
           vertical = 0;
           horizontal = 0;
         };
+        margin = {
+          horizontal = 0;
+          vertical = 5;
+        };
       };
 
       fonts = [ "monospace:size=10" ];
