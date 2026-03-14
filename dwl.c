@@ -423,6 +423,8 @@ static Monitor *xytomon(double x, double y);
 static void xytonode(double x, double y, struct wlr_surface **psurface,
 		Client **pc, LayerSurface **pl, double *nx, double *ny);
 static void zoom(const Arg *arg);
+static void swallow(Client *c, Client *toswallow);
+static Client *termforwin(Client *c);
 
 /* variables */
 static pid_t child_pid = -1;
