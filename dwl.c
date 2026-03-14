@@ -665,10 +665,10 @@ arrangelayers(Monitor *m)
 	if (!m->wlr_output->enabled)
 		return;
 
-	if (m->scene_buffer->node.enabled) {
-		usable_area.height -= m->b.real_height + vertpad;
-		usable_area.y += topbar ? m->b.real_height + vertpad : 0;
-	}
+  if (m->scene_buffer->node.enabled) {
+    usable_area.height -= m->b.real_height + barmarginv;
+    usable_area.y += topbar ? m->b.real_height + barmarginv : 0;
+  }
 
 	/* Arrange exclusive surfaces from top->bottom */
 	for (i = 3; i >= 0; i--)
@@ -839,7 +839,7 @@ buttonpress(struct wl_listener *listener, void *data)
 		if (!c && !exclusive_focus &&
 			(node = wlr_scene_node_at(&layers[LyrBottom]->node, cursor->x, cursor->y, NULL, NULL)) &&
 			(buffer = wlr_scene_buffer_from_node(node)) && buffer == selmon->scene_buffer) {
-			cx = (cursor->x - selmon->m.x - sidepad) * selmon->wlr_output->scale;
+      cx = (cursor->x - selmon->m.x - barmarginh) * selmon->wlr_output->scale;
 			do
 				x += TEXTW(selmon, tags[i]);
 			while (cx >= x && ++i < LENGTH(tags));
@@ -1725,8 +1725,8 @@ drawbar(Monitor *m)
 
 	wlr_scene_buffer_set_dest_size(m->scene_buffer,
 		m->b.real_width, m->b.real_height);
-	wlr_scene_node_set_position(&m->scene_buffer->node, m->m.x + sidepad,
-		m->m.y + (topbar ? vertpad : m->m.height - m->b.real_height - vertpad));
+wlr_scene_node_set_position(&m->scene_buffer->node, m->m.x + barmarginh,
+    m->m.y + (topbar ? barmarginv : m->m.height - m->b.real_height - barmarginv));
 	wlr_scene_buffer_set_buffer(m->scene_buffer, &buf->base);
 	wlr_buffer_unlock(&buf->base);
 }
@@ -3555,8 +3555,8 @@ updatebar(Monitor *m)
 	char fontattrs[12];
 
 	wlr_output_transformed_resolution(m->wlr_output, &rw, &rh);
-	m->b.width = rw - (2 * sidepad);
-	m->b.real_width = (int)((float)rw / m->wlr_output->scale) - (2 * sidepad);
+  m->b.width      = rw - (2 * barmarginh);
+  m->b.real_width = (int)((float)rw / m->wlr_output->scale) - (2 * barmarginh);
 
 	wlr_scene_node_set_enabled(&m->scene_buffer->node, m->wlr_output->enabled ? showbar : 0);
 
@@ -3575,8 +3575,8 @@ updatebar(Monitor *m)
 		die("Could not load font");
 
 	m->b.scale = m->wlr_output->scale;
-	m->lrpad = m->drw->font->height;
-	m->b.height = m->drw->font->height + 2;
+  m->lrpad   = m->drw->font->height + barpadh * 2;
+  m->b.height     = m->drw->font->height + 2 + 2 * barpadv;
 	m->b.real_height = (int)((float)m->b.height / m->wlr_output->scale);
 }
 

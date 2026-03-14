@@ -24,13 +24,13 @@ let
       bar = {
         enable = true;
         position_top = true;
-        padding = {
-          vertical = 0;
-          horizontal = 0;
-        };
         margin = {
           horizontal = 0;
-          vertical = 5;
+          vertical = 0;
+        };
+        padding = {
+          vertical = 0;
+          horizontal = 5;
         };
       };
 
@@ -1235,8 +1235,10 @@ let
       static const unsigned int borderpx                  = ${formatValue cfg.general.border_width};
       static const int          showbar                   = ${formatValue cfg.appearance.bar.enable};
       static const int          topbar                    = ${formatValue cfg.appearance.bar.position_top};
-      static const int          vertpad                   = ${formatValue cfg.appearance.bar.padding.vertical};
-      static const int          sidepad                   = ${formatValue cfg.appearance.bar.padding.horizontal};
+      static const int          barmarginv = ${formatValue cfg.appearance.bar.margin.vertical};
+      static const int          barmarginh = ${formatValue cfg.appearance.bar.margin.horizontal};
+      static const int          barpadv    = ${formatValue cfg.appearance.bar.padding.vertical};
+      static const int          barpadh    = ${formatValue cfg.appearance.bar.padding.horizontal};
       static const char        *fonts[]                   = { ${formatStringArray cfg.appearance.fonts} };
       static const float        rootcolor[]               = COLOR(${hexToColorMacro cfg.appearance.colors.root});
       static const float        fullscreen_bg[]           = COLOR(${hexToColorMacro cfg.appearance.colors.fullscreen});

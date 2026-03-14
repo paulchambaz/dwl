@@ -16,8 +16,10 @@ static const unsigned int gappov           = 10; /* vert outer gap between windo
 static const unsigned int borderpx         = 1;  /* border pixel of windows */
 static const int showbar                   = 1; /* 0 means no bar */
 static const int topbar                    = 1; /* 0 means bottom bar */
-static const int vertpad                   = 10; /* vertical padding of bar */
-static const int sidepad                   = 10; /* horizontal padding of bar */
+static const int barmarginv = 0;  /* vertical margin: gap between bar and screen edge */
+static const int barmarginh = 0;  /* horizontal margin: gap between bar and screen sides */
+static const int barpadv    = 5;  /* vertical padding: extra bar height above/below font */
+static const int barpadh    = 0;  /* horizontal padding: extra space around bar text */
 static const char *fonts[]                 = {"monospace:size=10"};
 static const float rootcolor[]             = COLOR(0x000000ff);
 /* This conforms to the xdg-protocol. Set the alpha to zero to restore the old behavior */
