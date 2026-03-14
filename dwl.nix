@@ -25,8 +25,8 @@ let
         enable = true;
         position_top = true;
         padding = {
-          vertical = 10;
-          horizontal = 10;
+          vertical = 0;
+          horizontal = 0;
         };
       };
 
@@ -98,7 +98,7 @@ let
     windows = {
       swallow = {
         enable = true;
-        border_multiplier = 1.0;
+        border_multiplier = 0.0;
       };
 
       rules = [
