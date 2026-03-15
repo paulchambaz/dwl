@@ -1223,6 +1223,9 @@ let
           ((hex >> 8)  & 0xFF) / 255.0f, (hex & 0xFF)         / 255.0f }
 
       static const int          tabletmaptosurface        = ${formatValue cfg.input.tablet.map_to_surface};
+      static const char        *tabletoutput              = ${
+        if cfg.input.tablet.tablet_output == null then "NULL" else ''"${cfg.input.tablet.tablet_output}"''
+      };
       static const int          sloppyfocus               = ${formatValue cfg.general.focus_follows_mouse};
       static const int          bypass_surface_visibility = ${formatValue cfg.advanced.idle_inhibit_visible_only};
       static const int          smartborders              = ${formatValue cfg.general.smart_borders};
