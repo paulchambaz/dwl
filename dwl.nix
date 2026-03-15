@@ -73,6 +73,7 @@ let
     input = {
       tablet = {
         map_to_surface = false;
+        tablet_output = null;
       };
 
       keyboard = {
