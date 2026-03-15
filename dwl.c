@@ -289,6 +289,32 @@ typedef struct {
 	struct wl_listener destroy;
 } SessionLock;
 
+typedef struct {
+	struct wlr_tablet_v2_tablet *tablet_v2;
+	struct wlr_input_device *wlr_device;
+	struct wl_listener destroy;
+	struct wl_list link;
+} Tablet;
+
+typedef struct {
+	struct wlr_tablet_v2_tablet_tool *tablet_v2;
+	Tablet *tablet;
+	struct wlr_surface *curr_surface;
+	struct wl_listener destroy;
+	struct wl_listener surface_destroy;
+	struct wl_listener set_cursor;
+	double tilt_x, tilt_y;
+} TabletTool;
+
+typedef struct {
+	struct wlr_tablet_v2_tablet_pad *tablet_v2;
+	struct wlr_input_device *wlr_device;
+	Tablet *tablet;
+	struct wl_listener tablet_destroy;
+	struct wl_listener destroy;
+	struct wl_list link;
+} TabletPad;
+
 /* function declarations */
 static void applybounds(Client *c, struct wlr_box *bbox);
 static void applyrules(Client *c);
@@ -326,7 +352,6 @@ static void createnotify(struct wl_listener *listener, void *data);
 static void createpointer(struct wlr_pointer *pointer);
 static void createpointerconstraint(struct wl_listener *listener, void *data);
 static void createpopup(struct wl_listener *listener, void *data);
-static void createtablet(struct wlr_input_device *device);
 static void cursorconstrain(struct wlr_pointer_constraint_v1 *constraint);
 static void cursorframe(struct wl_listener *listener, void *data);
 static void cursorwarptohint(void);
@@ -341,9 +366,6 @@ static void destroynotify(struct wl_listener *listener, void *data);
 static void destroypointerconstraint(struct wl_listener *listener, void *data);
 static void destroysessionlock(struct wl_listener *listener, void *data);
 static void destroykeyboardgroup(struct wl_listener *listener, void *data);
-static void destroytablet(struct wl_listener *listener, void *data);
-static void destroytabletsurfacenotify(struct wl_listener *listener, void *data);
-static void destroytablettool(struct wl_listener *listener, void *data);
 static Monitor *dirtomon(enum wlr_direction dir);
 static void drawbar(Monitor *m);
 static void drawbars(void);
@@ -407,11 +429,6 @@ static void startdrag(struct wl_listener *listener, void *data);
 static int statusin(int fd, unsigned int mask, void *data);
 static void tag(const Arg *arg);
 static void tagmon(const Arg *arg);
-static void tablettoolmotion(struct wlr_tablet_v2_tablet_tool *tool, bool change_x, bool change_y, double x, double y, double dx, double dy);
-static void tablettoolproximity(struct wl_listener *listener, void *data);
-static void tablettoolaxis(struct wl_listener *listener, void *data);
-static void tablettoolbutton(struct wl_listener *listener, void *data);
-static void tablettooltip(struct wl_listener *listener, void *data);
 static void tile(Monitor *m);
 static void togglebar(const Arg *arg);
 static void togglefloating(const Arg *arg);
@@ -437,6 +454,23 @@ static void xytonode(double x, double y, struct wlr_surface **psurface,
 static void zoom(const Arg *arg);
 static void swallow(Client *c, Client *toswallow);
 static Client *termforwin(Client *c);
+static void attachpadtotablet(TabletPad *p, Tablet *t);
+static void createtablet(struct wlr_input_device *device);
+static void createtabletpad(struct wlr_input_device *device);
+static void destroytablet(struct wl_listener *listener, void *data);
+static void destroytabletpad(struct wl_listener *listener, void *data);
+static void destroytablettool(struct wl_listener *listener, void *data);
+static void destroytablettoolsurface(struct wl_listener *listener, void *data);
+static void handlepadtabletdestroy(struct wl_listener *listener, void *data);
+static Tablet *tabletfromdevice(struct wlr_input_device *device);
+static void tablettoolaxis(struct wl_listener *listener, void *data);
+static void tablettoolbutton(struct wl_listener *listener, void *data);
+static void tablettoolenter(TabletTool *t, struct wlr_surface *surface, double sx, double sy);
+static void tablettoolleave(TabletTool *t);
+static void tablettoolmotion(TabletTool *t, bool change_x, bool change_y, double x, double y, double dx, double dy, uint32_t time_msec);
+static void tablettoolproximity(struct wl_listener *listener, void *data);
+static void tablettoolsetcursor(struct wl_listener *listener, void *data);
+static void tablettooltip(struct wl_listener *listener, void *data);
 
 /* variables */
 static pid_t child_pid = -1;
@@ -477,11 +511,8 @@ static struct wlr_cursor *cursor;
 static struct wlr_xcursor_manager *cursor_mgr;
 
 static struct wlr_tablet_manager_v2 *tablet_mgr;
-static struct wlr_tablet_v2_tablet *tablet = NULL;
-static struct wlr_tablet_v2_tablet_tool *tablet_tool = NULL;
-static struct wlr_tablet_v2_tablet_pad *tablet_pad = NULL;
-static struct wlr_surface *tablet_curr_surface = NULL;
-static struct wl_listener destroy_tablet_surface_listener = {.notify = destroytabletsurfacenotify};
+static struct wl_list tablets;
+static struct wl_list tablet_pads;
 
 static struct wlr_scene_rect *root_bg;
 static struct wlr_session_lock_manager_v1 *session_lock_mgr;
@@ -515,12 +546,6 @@ static struct wl_listener cursor_button = {.notify = buttonpress};
 static struct wl_listener cursor_frame = {.notify = cursorframe};
 static struct wl_listener cursor_motion = {.notify = motionrelative};
 static struct wl_listener cursor_motion_absolute = {.notify = motionabsolute};
-static struct wl_listener tablet_device_destroy = {.notify = destroytablet};
-static struct wl_listener tablet_tool_axis = {.notify = tablettoolaxis};
-static struct wl_listener tablet_tool_button = {.notify = tablettoolbutton};
-static struct wl_listener tablet_tool_destroy = {.notify = destroytablettool};
-static struct wl_listener tablet_tool_proximity = {.notify = tablettoolproximity};
-static struct wl_listener tablet_tool_tip = {.notify = tablettooltip};
 static struct wl_listener gpu_reset = {.notify = gpureset};
 static struct wl_listener layout_change = {.notify = updatemons};
 static struct wl_listener new_idle_inhibitor = {.notify = createidleinhibitor};
@@ -544,6 +569,10 @@ static struct wl_listener request_set_cursor_shape = {.notify = setcursorshape};
 static struct wl_listener request_start_drag = {.notify = requeststartdrag};
 static struct wl_listener start_drag = {.notify = startdrag};
 static struct wl_listener new_session_lock = {.notify = locksession};
+static struct wl_listener tablet_tool_proximity = {.notify = tablettoolproximity};
+static struct wl_listener tablet_tool_axis = {.notify = tablettoolaxis};
+static struct wl_listener tablet_tool_button = {.notify = tablettoolbutton};
+static struct wl_listener tablet_tool_tip = {.notify = tablettooltip};
 
 #ifdef XWAYLAND
 static void activatex11(struct wl_listener *listener, void *data);
@@ -1029,6 +1058,10 @@ cleanuplisteners(void)
 	wl_list_remove(&cursor_frame.link);
 	wl_list_remove(&cursor_motion.link);
 	wl_list_remove(&cursor_motion_absolute.link);
+	wl_list_remove(&tablet_tool_proximity.link);
+	wl_list_remove(&tablet_tool_axis.link);
+	wl_list_remove(&tablet_tool_button.link);
+	wl_list_remove(&tablet_tool_tip.link);
 	wl_list_remove(&gpu_reset.link);
 	wl_list_remove(&new_idle_inhibitor.link);
 	wl_list_remove(&layout_change.link);
@@ -1493,27 +1526,6 @@ createpopup(struct wl_listener *listener, void *data)
 	LISTEN_STATIC(&popup->base->surface->events.commit, commitpopup);
 }
 
-void
-createtablet(struct wlr_input_device *device)
-{
-	if (!tablet) {
-		struct libinput_device *device_handle = NULL;
-		if (!wlr_input_device_is_libinput(device) ||
-				!(device_handle = wlr_libinput_get_device_handle(device)))
-			return;
-
-		tablet = wlr_tablet_create(tablet_mgr, seat, device);
-		wl_signal_add(&tablet->wlr_device->events.destroy, &tablet_device_destroy);
-		if (libinput_device_config_send_events_get_modes(device_handle)) {
-			libinput_device_config_send_events_set_mode(device_handle, send_events_mode);
-			wlr_cursor_attach_input_device(cursor, device);
-		}
-	} else if (device == tablet->wlr_device) {
-		wlr_log(WLR_ERROR, "createtablet: duplicate device");
-	} else {
-		wlr_log(WLR_ERROR, "createtablet: already have one tablet");
-	}
-}
 
 void
 cursorconstrain(struct wlr_pointer_constraint_v1 *constraint)
@@ -1703,29 +1715,6 @@ destroykeyboardgroup(struct wl_listener *listener, void *data)
 	wl_list_remove(&group->destroy.link);
 	wlr_keyboard_group_destroy(group->wlr_group);
 	free(group);
-}
-
-void
-destroytablet(struct wl_listener *listener, void *data)
-{
-  wl_list_remove(&tablet_device_destroy.link);
-  wlr_cursor_detach_input_device(cursor, tablet->wlr_device);
-	tablet = NULL;
-}
-
-void
-destroytabletsurfacenotify(struct wl_listener *listener, void *data)
-{
-	if (tablet_curr_surface)
-		wl_list_remove(&destroy_tablet_surface_listener.link);
-	tablet_curr_surface = NULL;
-}
-
-void
-destroytablettool(struct wl_listener *listener, void *data)
-{
-	destroytabletsurfacenotify(NULL, NULL);
-	tablet_tool = NULL;
 }
 
 Monitor *
@@ -2088,8 +2077,6 @@ incovgaps(const Arg *arg)
 void
 inputdevice(struct wl_listener *listener, void *data)
 {
-	/* This event is raised by the backend when a new input device becomes
-	 * available. */
 	struct wlr_input_device *device = data;
 	uint32_t caps;
 
@@ -2100,21 +2087,16 @@ inputdevice(struct wl_listener *listener, void *data)
 	case WLR_INPUT_DEVICE_POINTER:
 		createpointer(wlr_pointer_from_input_device(device));
 		break;
-        case WLR_INPUT_DEVICE_TABLET:
+	case WLR_INPUT_DEVICE_TABLET:
 		createtablet(device);
 		break;
 	case WLR_INPUT_DEVICE_TABLET_PAD:
-	        tablet_pad = wlr_tablet_pad_create(tablet_mgr, seat, device);
+		createtabletpad(device);
 		break;
 	default:
-		/* TODO handle other input device types */
 		break;
 	}
 
-	/* We need to let the wlr_seat know what our capabilities are, which is
-	 * communiciated to the client. In dwl we always have a cursor, even if
-	 * there are no pointer devices, so we always include that capability. */
-	/* TODO do we actually require a cursor? */
 	caps = WL_SEAT_CAPABILITY_POINTER;
 	if (!wl_list_empty(&kb_group->wlr_group->devices))
 		caps |= WL_SEAT_CAPABILITY_KEYBOARD;
@@ -2975,22 +2957,14 @@ setup(void)
 	for (i = 0; i < (int)LENGTH(sig); i++)
 		sigaction(sig[i], &sa, NULL);
 
-
 	wlr_log_init(log_level, NULL);
 
-	/* The Wayland display is managed by libwayland. It handles accepting
-	 * clients from the Unix socket, manging Wayland globals, and so on. */
 	dpy = wl_display_create();
 	event_loop = wl_display_get_event_loop(dpy);
 
-	/* The backend is a wlroots feature which abstracts the underlying input and
-	 * output hardware. The autocreate option will choose the most suitable
-	 * backend based on the current environment, such as opening an X11 window
-	 * if an X11 server is running. */
 	if (!(backend = wlr_backend_autocreate(event_loop, &session)))
 		die("couldn't create backend");
 
-	/* Initialize the scene graph used to lay out windows */
 	scene = wlr_scene_create();
 	root_bg = wlr_scene_rect_create(&scene->tree, 0, 0, rootcolor);
 	for (i = 0; i < NUM_LAYERS; i++)
@@ -2998,19 +2972,10 @@ setup(void)
 	drag_icon = wlr_scene_tree_create(&scene->tree);
 	wlr_scene_node_place_below(&drag_icon->node, &layers[LyrBlock]->node);
 
-	/* Autocreates a renderer, either Pixman, GLES2 or Vulkan for us. The user
-	 * can also specify a renderer using the WLR_RENDERER env var.
-	 * The renderer is responsible for defining the various pixel formats it
-	 * supports for shared memory, this configures that for clients. */
 	if (!(drw = wlr_renderer_autocreate(backend)))
 		die("couldn't create renderer");
 	wl_signal_add(&drw->events.lost, &gpu_reset);
 
-	/* Create shm, drm and linux_dmabuf interfaces by ourselves.
-	 * The simplest way is to call:
-	 *      wlr_renderer_init_wl_display(drw);
-	 * but we need to create the linux_dmabuf interface manually to integrate it
-	 * with wlr_scene. */
 	wlr_renderer_init_wl_shm(drw, dpy);
 
 	if (wlr_renderer_get_texture_formats(drw, WLR_BUFFER_CAP_DMABUF)) {
@@ -3023,19 +2988,9 @@ setup(void)
 			&& backend->features.timeline)
 		wlr_linux_drm_syncobj_manager_v1_create(dpy, 1, drm_fd);
 
-	/* Autocreates an allocator for us.
-	 * The allocator is the bridge between the renderer and the backend. It
-	 * handles the buffer creation, allowing wlroots to render onto the
-	 * screen */
 	if (!(alloc = wlr_allocator_autocreate(backend, drw)))
 		die("couldn't create allocator");
 
-	/* This creates some hands-off wlroots interfaces. The compositor is
-	 * necessary for clients to allocate surfaces and the data device manager
-	 * handles the clipboard. Each of these wlroots interfaces has room for you
-	 * to dig your fingers in and play with their behavior if you want. Note that
-	 * the clients cannot set the selection directly without compositor approval,
-	 * see the setsel() function. */
 	compositor = wlr_compositor_create(dpy, 6, drw);
 	wlr_subcompositor_create(dpy);
 	wlr_data_device_manager_create(dpy);
@@ -3049,7 +3004,6 @@ setup(void)
 	wlr_presentation_create(dpy, backend, 2);
 	wlr_alpha_modifier_v1_create(dpy);
 
-	/* Initializes the interface used to implement urgency hints */
 	activation = wlr_xdg_activation_v1_create(dpy);
 	wl_signal_add(&activation->events.request_activate, &request_activate);
 
@@ -3058,24 +3012,14 @@ setup(void)
 	power_mgr = wlr_output_power_manager_v1_create(dpy);
 	wl_signal_add(&power_mgr->events.set_mode, &output_power_mgr_set_mode);
 
-	/* Creates an output layout, which is a wlroots utility for working with an
-	 * arrangement of screens in a physical layout. */
 	output_layout = wlr_output_layout_create(dpy);
 	wl_signal_add(&output_layout->events.change, &layout_change);
 
-    wlr_xdg_output_manager_v1_create(dpy, output_layout);
+	wlr_xdg_output_manager_v1_create(dpy, output_layout);
 
-	/* Configure a listener to be notified when new outputs are available on the
-	 * backend. */
 	wl_list_init(&mons);
 	wl_signal_add(&backend->events.new_output, &new_output);
 
-	/* Set up our client lists, the xdg-shell and the layer-shell. The xdg-shell is a
-	 * Wayland protocol which is used for application windows. For more
-	 * detail on shells, refer to the article:
-	 *
-	 * https://drewdevault.com/2018/07/29/Wayland-shells.html
-	 */
 	wl_list_init(&clients);
 	wl_list_init(&fstack);
 
@@ -3097,7 +3041,6 @@ setup(void)
 			(float [4]){0.1f, 0.1f, 0.1f, 1.0f});
 	wlr_scene_node_set_enabled(&locked_bg->node, 0);
 
-	/* Use decoration protocols to negotiate server-side decorations */
 	wlr_server_decoration_manager_set_default_mode(
 			wlr_server_decoration_manager_create(dpy),
 			WLR_SERVER_DECORATION_MANAGER_MODE_SERVER);
@@ -3109,92 +3052,63 @@ setup(void)
 
 	relative_pointer_mgr = wlr_relative_pointer_manager_v1_create(dpy);
 
+	/* tablet */
 	tablet_mgr = wlr_tablet_v2_create(dpy);
+	wl_list_init(&tablets);
+	wl_list_init(&tablet_pads);
 
-	/*
-	 * Creates a cursor, which is a wlroots utility for tracking the cursor
-	 * image shown on screen.
-	 */
 	cursor = wlr_cursor_create();
 	wlr_cursor_attach_output_layout(cursor, output_layout);
 
-	/* Creates an xcursor manager, another wlroots utility which loads up
-	 * Xcursor themes to source cursor images from and makes sure that cursor
-	 * images are available at all scale factors on the screen (necessary for
-	 * HiDPI support). Scaled cursors will be loaded with each output. */
 	cursor_mgr = wlr_xcursor_manager_create(NULL, 24);
 	setenv("XCURSOR_SIZE", "24", 1);
 
-	/*
-	 * wlr_cursor *only* displays an image on screen. It does not move around
-	 * when the pointer moves. However, we can attach input devices to it, and
-	 * it will generate aggregate events for all of them. In these events, we
-	 * can choose how we want to process them, forwarding them to clients and
-	 * moving the cursor around. More detail on this process is described in
-	 * https://drewdevault.com/2018/07/17/Input-handling-in-wlroots.html
-	 *
-	 * And more comments are sprinkled throughout the notify functions above.
-	 */
-	wl_signal_add(&cursor->events.motion, &cursor_motion);
+	wl_signal_add(&cursor->events.motion,          &cursor_motion);
 	wl_signal_add(&cursor->events.motion_absolute, &cursor_motion_absolute);
-	wl_signal_add(&cursor->events.button, &cursor_button);
-	wl_signal_add(&cursor->events.axis, &cursor_axis);
-	wl_signal_add(&cursor->events.frame, &cursor_frame);
+	wl_signal_add(&cursor->events.button,          &cursor_button);
+	wl_signal_add(&cursor->events.axis,            &cursor_axis);
+	wl_signal_add(&cursor->events.frame,           &cursor_frame);
+	/* tablet — cursor aggregates events from all attached tablet devices */
 	wl_signal_add(&cursor->events.tablet_tool_proximity, &tablet_tool_proximity);
-	wl_signal_add(&cursor->events.tablet_tool_axis, &tablet_tool_axis);
-	wl_signal_add(&cursor->events.tablet_tool_button, &tablet_tool_button);
-	wl_signal_add(&cursor->events.tablet_tool_tip, &tablet_tool_tip);
-
+	wl_signal_add(&cursor->events.tablet_tool_axis,      &tablet_tool_axis);
+	wl_signal_add(&cursor->events.tablet_tool_button,    &tablet_tool_button);
+	wl_signal_add(&cursor->events.tablet_tool_tip,       &tablet_tool_tip);
 
 	cursor_shape_mgr = wlr_cursor_shape_manager_v1_create(dpy, 1);
 	wl_signal_add(&cursor_shape_mgr->events.request_set_shape, &request_set_cursor_shape);
 
-	/*
-	 * Configures a seat, which is a single "seat" at which a user sits and
-	 * operates the computer. This conceptually includes up to one keyboard,
-	 * pointer, touch, and drawing tablet device. We also rig up a listener to
-	 * let us know when new input devices are available on the backend.
-	 */
 	wl_signal_add(&backend->events.new_input, &new_input_device);
 	virtual_keyboard_mgr = wlr_virtual_keyboard_manager_v1_create(dpy);
 	wl_signal_add(&virtual_keyboard_mgr->events.new_virtual_keyboard,
 			&new_virtual_keyboard);
 	virtual_pointer_mgr = wlr_virtual_pointer_manager_v1_create(dpy);
-    wl_signal_add(&virtual_pointer_mgr->events.new_virtual_pointer,
-            &new_virtual_pointer);
+	wl_signal_add(&virtual_pointer_mgr->events.new_virtual_pointer,
+			&new_virtual_pointer);
 
 	seat = wlr_seat_create(dpy, "seat0");
-	wl_signal_add(&seat->events.request_set_cursor, &request_cursor);
-	wl_signal_add(&seat->events.request_set_selection, &request_set_sel);
-	wl_signal_add(&seat->events.request_set_primary_selection, &request_set_psel);
-	wl_signal_add(&seat->events.request_start_drag, &request_start_drag);
-	wl_signal_add(&seat->events.start_drag, &start_drag);
+	wl_signal_add(&seat->events.request_set_cursor,             &request_cursor);
+	wl_signal_add(&seat->events.request_set_selection,          &request_set_sel);
+	wl_signal_add(&seat->events.request_set_primary_selection,  &request_set_psel);
+	wl_signal_add(&seat->events.request_start_drag,             &request_start_drag);
+	wl_signal_add(&seat->events.start_drag,                     &start_drag);
 
 	kb_group = createkeyboardgroup();
 	wl_list_init(&kb_group->destroy.link);
 
 	output_mgr = wlr_output_manager_v1_create(dpy);
 	wl_signal_add(&output_mgr->events.apply, &output_mgr_apply);
-	wl_signal_add(&output_mgr->events.test, &output_mgr_test);
+	wl_signal_add(&output_mgr->events.test,  &output_mgr_test);
 
 	drwl_init();
 
 	status_event_source = wl_event_loop_add_fd(wl_display_get_event_loop(dpy),
 		STDIN_FILENO, WL_EVENT_READABLE, statusin, NULL);
 
-	/* Make sure XWayland clients don't connect to the parent X server,
-	 * e.g when running in the x11 backend or the wayland backend and the
-	 * compositor has Xwayland support */
 	unsetenv("DISPLAY");
 #ifdef XWAYLAND
-	/*
-	 * Initialise the XWayland X server.
-	 * It will be started when the first X client is started.
-	 */
 	if ((xwayland = wlr_xwayland_create(dpy, compositor, 1))) {
-		wl_signal_add(&xwayland->events.ready, &xwayland_ready);
+		wl_signal_add(&xwayland->events.ready,       &xwayland_ready);
 		wl_signal_add(&xwayland->events.new_surface, &new_xwayland_surface);
-
 		setenv("DISPLAY", xwayland->display_name, 1);
 	} else {
 		fprintf(stderr, "failed to setup XWayland X server, continuing without it\n");
@@ -3341,187 +3255,6 @@ termforwin(Client *c)
 	}
 
 	return NULL;
-}
-
-void
-tabletapplymap(double x, double y, struct wlr_input_device *dev)
-{
-  if (tabletmaptosurface && tablet_curr_surface) {
-    Client *p;
-    struct wlr_box geom = {0};
-    toplevel_from_wlr_surface(tablet_curr_surface, &p, NULL);
-    if (p) {
-      for (; client_get_parent(p); p = client_get_parent(p));
-      geom.x      = p->geom.x + p->bw;
-      geom.y      = p->geom.y + p->bw;
-      geom.width  = p->geom.width  - 2 * p->bw;
-      geom.height = p->geom.height - 2 * p->bw;
-    }
-    wlr_cursor_map_input_to_region(cursor, dev, &geom);
-    wlr_cursor_map_input_to_output(cursor, dev, NULL);
-    return;
-  }
-
-  if (tabletoutput) {
-    Monitor *m;
-    wl_list_for_each(m, &mons, link) {
-      if (strcmp(m->wlr_output->name, tabletoutput) == 0) {
-        struct wlr_box ob = {0};
-        wlr_output_layout_get_box(output_layout, m->wlr_output, &ob);
-        if (ob.width > 0 && ob.height > 0) {
-          struct wlr_box region = {0};
-          region.x      = 0;
-          region.y      = 0;
-          region.width  = ob.x + ob.width;
-          region.height = ob.y + ob.height;
-          wlr_cursor_map_input_to_region(cursor, dev, &region);
-          wlr_cursor_map_input_to_output(cursor, dev, NULL);
-          return;
-        }
-      }
-    }
-  }
-
-  wlr_cursor_map_input_to_region(cursor, dev, NULL);
-  wlr_cursor_map_input_to_output(cursor, dev, NULL);
-}
-
-void
-tablettoolmotion(struct wlr_tablet_v2_tablet_tool *tool, bool change_x, bool change_y,
-		double x, double y, double dx, double dy)
-{
-	struct wlr_surface *surface = NULL;
-	double sx, sy;
-
-	if (!change_x && !change_y)
-		return;
-
-	tabletapplymap(x, y, tablet->wlr_device);
-
-	// TODO: apply constraints
-	switch (tablet_tool->wlr_tool->type) {
-	case WLR_TABLET_TOOL_TYPE_LENS:
-	case WLR_TABLET_TOOL_TYPE_MOUSE:
-		wlr_cursor_move(cursor, tablet->wlr_device, dx, dy);
-		break;
-	default:
-		wlr_cursor_warp_absolute(cursor, tablet->wlr_device, change_x ? x : NAN, change_y ? y : NAN);
-		break;
-	}
-
-	motionnotify(0, NULL, 0, 0, 0, 0);
-
-	xytonode(cursor->x, cursor->y, &surface, NULL, NULL, &sx, &sy);
-	if (surface && !wlr_surface_accepts_tablet_v2(surface, tablet))
-		surface = NULL;
-
-	if (surface != tablet_curr_surface) {
-		if (tablet_curr_surface) {
-			// TODO: wait until all buttons released before leaving
-			if (tablet_tool)
-				wlr_tablet_v2_tablet_tool_notify_proximity_out(tablet_tool);
-			if (tablet_pad)
-				wlr_tablet_v2_tablet_pad_notify_leave(tablet_pad, tablet_curr_surface);
-			wl_list_remove(&destroy_tablet_surface_listener.link);
-		}
-		if (surface) {
-			if (tablet_pad)
-				wlr_tablet_v2_tablet_pad_notify_enter(tablet_pad, tablet, surface);
-			if (tablet_tool)
-				wlr_tablet_v2_tablet_tool_notify_proximity_in(tablet_tool, tablet, surface);
-			wl_signal_add(&surface->events.destroy, &destroy_tablet_surface_listener);
-		}
-		tablet_curr_surface = surface;
-	}
-
-	if (surface)
-		wlr_tablet_v2_tablet_tool_notify_motion(tablet_tool, sx, sy);
-}
-
-void
-tablettoolproximity(struct wl_listener *listener, void *data)
-{
-	struct wlr_tablet_tool_proximity_event *event = data;
-	struct wlr_tablet_tool *tool = event->tool;
-
-	if (!tablet_tool) {
-		tablet_tool = wlr_tablet_tool_create(tablet_mgr, seat, tool);
-		wl_signal_add(&tablet_tool->wlr_tool->events.destroy, &tablet_tool_destroy);
-		wl_signal_add(&tablet_tool->events.set_cursor, &request_cursor);
-	}
-
-	switch (event->state) {
-	case WLR_TABLET_TOOL_PROXIMITY_OUT:
-		wlr_tablet_v2_tablet_tool_notify_proximity_out(tablet_tool);
-		destroytabletsurfacenotify(NULL, NULL);
-		break;
-	case WLR_TABLET_TOOL_PROXIMITY_IN:
-		tablettoolmotion(tablet_tool, true, true, event->x, event->y, 0, 0);
-		break;
-	}
-}
-
-double tilt_x = 0;
-double tilt_y = 0;
-
-void
-tablettoolaxis(struct wl_listener *listener, void *data)
-{
-	struct wlr_tablet_tool_axis_event *event = data;
-
-	tablettoolmotion(tablet_tool,
-		event->updated_axes & WLR_TABLET_TOOL_AXIS_X,
-		event->updated_axes & WLR_TABLET_TOOL_AXIS_Y,
-		event->x, event->y, event->dx, event->dy);
-
-	if (event->updated_axes & WLR_TABLET_TOOL_AXIS_PRESSURE)
-		wlr_tablet_v2_tablet_tool_notify_pressure(tablet_tool, event->pressure);
-	if (event->updated_axes & WLR_TABLET_TOOL_AXIS_DISTANCE)
-		wlr_tablet_v2_tablet_tool_notify_distance(tablet_tool, event->distance);
-	if (event->updated_axes & WLR_TABLET_TOOL_AXIS_TILT_X)
-		tilt_x = event->tilt_x;
-	if (event->updated_axes & WLR_TABLET_TOOL_AXIS_TILT_Y)
-		tilt_y = event->tilt_y;
-	if (event->updated_axes & (WLR_TABLET_TOOL_AXIS_TILT_X | WLR_TABLET_TOOL_AXIS_TILT_Y))
-		wlr_tablet_v2_tablet_tool_notify_tilt(tablet_tool, tilt_x, tilt_y);
-	if (event->updated_axes & WLR_TABLET_TOOL_AXIS_ROTATION)
-		wlr_tablet_v2_tablet_tool_notify_rotation(tablet_tool, event->rotation);
-	if (event->updated_axes & WLR_TABLET_TOOL_AXIS_SLIDER)
-		wlr_tablet_v2_tablet_tool_notify_slider(tablet_tool, event->slider);
-	if (event->updated_axes & WLR_TABLET_TOOL_AXIS_WHEEL)
-		wlr_tablet_v2_tablet_tool_notify_wheel(tablet_tool, event->wheel_delta, 0);
-}
-
-void
-tablettoolbutton(struct wl_listener *listener, void *data)
-{
-	struct wlr_tablet_tool_button_event *event = data;
-	wlr_tablet_v2_tablet_tool_notify_button(tablet_tool, event->button,
-		(enum zwp_tablet_pad_v2_button_state)event->state);
-}
-
-void
-tablettooltip(struct wl_listener *listener, void *data)
-{
-	struct wlr_tablet_tool_tip_event *event = data;
-
-	if (!tablet_curr_surface) {
-		struct wlr_pointer_button_event fakeptrbtnevent = {
-			.button = BTN_LEFT,
-			.state = event->state == WLR_TABLET_TOOL_TIP_UP ?
-				WL_POINTER_BUTTON_STATE_RELEASED : WL_POINTER_BUTTON_STATE_PRESSED,
-			.time_msec = event->time_msec,
-		};
-		buttonpress(NULL, (void *)&fakeptrbtnevent);
-	}
-
-	if (event->state == WLR_TABLET_TOOL_TIP_UP) {
-		wlr_tablet_v2_tablet_tool_notify_up(tablet_tool);
-		return;
-	}
-
-	wlr_tablet_v2_tablet_tool_notify_down(tablet_tool);
-	wlr_tablet_tool_v2_start_implicit_grab(tablet_tool);
 }
 
 void
@@ -3987,6 +3720,477 @@ zoom(const Arg *arg)
 
 	focusclient(sel, 1);
 	arrange(selmon);
+}
+
+/*
+ * Returns the Tablet wrapper for a given wlr_input_device, or NULL.
+ * Used to look up our state from the wlr_input_device embedded in wlr_tablet
+ * (event->tablet->base).
+ */
+static Tablet *
+tabletfromdevice(struct wlr_input_device *device)
+{
+	Tablet *t;
+	wl_list_for_each(t, &tablets, link)
+		if (t->wlr_device == device)
+			return t;
+	return NULL;
+}
+
+/*
+ * Associate a pad with a tablet so that pad enter/leave events are forwarded
+ * to the correct surface.  Also listen on the tablet's destroy event to null
+ * out the back-pointer if the tablet disappears first.
+ */
+static void
+attachpadtotablet(TabletPad *p, Tablet *t)
+{
+	p->tablet = t;
+	p->tablet_destroy.notify = handlepadtabletdestroy;
+	wl_signal_add(&t->wlr_device->events.destroy, &p->tablet_destroy);
+	wlr_log(WLR_DEBUG, "attached tablet pad to tablet \"%s\"", t->wlr_device->name);
+}
+
+static void
+handlepadtabletdestroy(struct wl_listener *listener, void *data)
+{
+	TabletPad *p = wl_container_of(listener, p, tablet_destroy);
+	p->tablet = NULL;
+	wl_list_remove(&p->tablet_destroy.link);
+	wl_list_init(&p->tablet_destroy.link);
+}
+
+static void
+destroytablet(struct wl_listener *listener, void *data)
+{
+	Tablet *t = wl_container_of(listener, t, destroy);
+
+	wlr_cursor_detach_input_device(cursor, t->wlr_device);
+	wl_list_remove(&t->destroy.link);
+	wl_list_remove(&t->link);
+	/* Each TabletPad cleans up its own back-pointer via handlepadtabletdestroy. */
+	free(t);
+}
+
+/*
+ * Create a Tablet wrapper for a newly connected tablet device.
+ *
+ * We call wlr_cursor_attach_input_device unconditionally: OTD's virtual
+ * uinput device may report zero send-events modes, and we must not gate
+ * the attach on that.  The cursor mapping is left at NULL (full virtual
+ * layout) by default so that OTD's own display-area mapping is honoured
+ * unchanged.  Set tabletoutput in config.h to pin the tablet to a specific
+ * named output instead.
+ */
+static void
+createtablet(struct wlr_input_device *device)
+{
+	Tablet *t = ecalloc(1, sizeof(*t));
+	t->wlr_device = device;
+	t->tablet_v2  = wlr_tablet_create(tablet_mgr, seat, device);
+
+	/* Always attach so the cursor receives absolute events from this device. */
+	wlr_cursor_attach_input_device(cursor, device);
+
+	/* Apply send-events mode if the device supports configuration. */
+	if (wlr_input_device_is_libinput(device)) {
+		struct libinput_device *ldev = wlr_libinput_get_device_handle(device);
+		if (libinput_device_config_send_events_get_modes(ldev))
+			libinput_device_config_send_events_set_mode(ldev, send_events_mode);
+	}
+
+	/*
+	 * Cursor mapping:
+	 *   tabletoutput != NULL  →  map absolute [0,1] to that output only
+	 *   tabletoutput == NULL  →  map to the full layout (OTD handles placement)
+	 */
+	if (tabletoutput) {
+		Monitor *m;
+		wl_list_for_each(m, &mons, link) {
+			if (strcmp(m->wlr_output->name, tabletoutput) == 0) {
+				wlr_cursor_map_input_to_output(cursor, device, m->wlr_output);
+				wlr_log(WLR_DEBUG, "tablet \"%s\" mapped to output \"%s\"",
+					device->name, tabletoutput);
+				break;
+			}
+		}
+	}
+	/* else: wlroots defaults to the full layout — nothing to do */
+
+	t->destroy.notify = destroytablet;
+	wl_signal_add(&device->events.destroy, &t->destroy);
+	wl_list_insert(&tablets, &t->link);
+
+	/* Look for an already-registered pad in the same libinput device group. */
+	if (wlr_input_device_is_libinput(device)) {
+		struct libinput_device_group *tgroup =
+			libinput_device_get_device_group(wlr_libinput_get_device_handle(device));
+		TabletPad *pad;
+		wl_list_for_each(pad, &tablet_pads, link) {
+			if (pad->tablet || !wlr_input_device_is_libinput(pad->wlr_device))
+				continue;
+			struct libinput_device_group *pgroup =
+				libinput_device_get_device_group(
+					wlr_libinput_get_device_handle(pad->wlr_device));
+			if (pgroup == tgroup) {
+				attachpadtotablet(pad, t);
+				break;
+			}
+		}
+	}
+}
+
+static void
+destroytabletpad(struct wl_listener *listener, void *data)
+{
+	TabletPad *p = wl_container_of(listener, p, destroy);
+
+	if (p->tablet)
+		wl_list_remove(&p->tablet_destroy.link);
+
+	wl_list_remove(&p->destroy.link);
+	wl_list_remove(&p->link);
+	free(p);
+}
+
+static void
+createtabletpad(struct wlr_input_device *device)
+{
+	TabletPad *p = ecalloc(1, sizeof(*p));
+	p->wlr_device = device;
+	p->tablet_v2  = wlr_tablet_pad_create(tablet_mgr, seat, device);
+	wl_list_init(&p->tablet_destroy.link);
+
+	p->destroy.notify = destroytabletpad;
+	wl_signal_add(&device->events.destroy, &p->destroy);
+	wl_list_insert(&tablet_pads, &p->link);
+
+	/* Look for an already-registered tablet in the same libinput device group. */
+	if (wlr_input_device_is_libinput(device)) {
+		struct libinput_device_group *pgroup =
+			libinput_device_get_device_group(wlr_libinput_get_device_handle(device));
+		Tablet *t;
+		wl_list_for_each(t, &tablets, link) {
+			if (!wlr_input_device_is_libinput(t->wlr_device))
+				continue;
+			struct libinput_device_group *tgroup =
+				libinput_device_get_device_group(
+					wlr_libinput_get_device_handle(t->wlr_device));
+			if (tgroup == pgroup) {
+				attachpadtotablet(p, t);
+				break;
+			}
+		}
+	}
+}
+
+/*
+ * Called when the wlr_surface that the tool was focused on is destroyed.
+ * Clears the back-pointer; the listener is already unlinked by wlroots.
+ */
+static void
+destroytablettoolsurface(struct wl_listener *listener, void *data)
+{
+  TabletTool *t = wl_container_of(listener, t, surface_destroy);
+  /* The listener was removed by wlroots on surface destroy; just reset. */
+  wl_list_init(&t->surface_destroy.link);
+  t->curr_surface = NULL;
+}
+
+/*
+ * Called when the logical wlr_tablet_tool is destroyed (e.g. tablet removed).
+ * Frees our wrapper; wlroots frees the wlr_tablet_tool itself after this.
+ */
+static void
+destroytablettool(struct wl_listener *listener, void *data)
+{
+  TabletTool *t  = wl_container_of(listener, t, destroy);
+  struct wlr_tablet_tool *wlr_tool = data;
+
+  if (t->curr_surface)
+    tablettoolleave(t);
+
+  wl_list_remove(&t->destroy.link);
+  wl_list_remove(&t->set_cursor.link);
+  wlr_tool->data = NULL;
+  free(t);
+}
+
+/*
+ * A client called zwp_tablet_tool_v2.set_cursor.  Forward to the hardware
+ * cursor, but only when we are not in a grab mode that overrides it.
+ */
+static void
+tablettoolsetcursor(struct wl_listener *listener, void *data)
+{
+  struct wlr_tablet_v2_event_cursor *event = data;
+  if (cursor_mode != CurNormal && cursor_mode != CurPressed)
+    return;
+  wlr_cursor_set_surface(cursor, event->surface,
+                         event->hotspot_x, event->hotspot_y);
+}
+
+/*
+ * Notify all pads associated with t->tablet that they have left a surface,
+ * send proximity_out to the client, and remove the surface-destroy listener.
+ *
+ * TODO: the protocol requires that any buttons still held be released before
+ *       the proximity_out event.  That requires per-tool button tracking and
+ *       is left as a future improvement.
+ */
+static void
+tablettoolleave(TabletTool *t)
+{
+  if (!t->curr_surface)
+    return;
+
+  TabletPad *pad;
+  wl_list_for_each(pad, &tablet_pads, link)
+  if (pad->tablet == t->tablet)
+    wlr_tablet_v2_tablet_pad_notify_leave(pad->tablet_v2, t->curr_surface);
+
+  wlr_tablet_v2_tablet_tool_notify_proximity_out(t->tablet_v2);
+
+  wl_list_remove(&t->surface_destroy.link);
+  wl_list_init(&t->surface_destroy.link);
+  t->curr_surface = NULL;
+}
+
+/*
+ * Notify all pads that they have entered a surface, send proximity_in to the
+ * client, and register a listener so we know if the surface is destroyed.
+ */
+static void
+tablettoolenter(TabletTool *t, struct wlr_surface *surface, double sx, double sy)
+{
+  TabletPad *pad;
+  wl_list_for_each(pad, &tablet_pads, link)
+  if (pad->tablet == t->tablet)
+    wlr_tablet_v2_tablet_pad_notify_enter(pad->tablet_v2,
+                                          t->tablet->tablet_v2, surface);
+
+  wlr_tablet_v2_tablet_tool_notify_proximity_in(t->tablet_v2,
+                                                t->tablet->tablet_v2, surface);
+
+  t->surface_destroy.notify = destroytablettoolsurface;
+  wl_signal_add(&surface->events.destroy, &t->surface_destroy);
+  t->curr_surface = surface;
+}
+
+/*
+ * Move the cursor and forward the resulting position to the focused tablet
+ * surface.  Also manages proximity in/out when the surface under the cursor
+ * changes.
+ *
+ * This is an internal helper called by tablettoolproximity and tablettoolaxis;
+ * the caller is responsible for sending the closing frame event.
+ */
+static void
+tablettoolmotion(TabletTool *t, bool change_x, bool change_y,
+                 double x, double y, double dx, double dy, uint32_t time_msec)
+{
+  if (!change_x && !change_y)
+    return;
+
+  /*
+   * MOUSE/LENS tools send relative deltas; all other tool types
+   * (pen, eraser, brush, …) send absolute normalised coordinates.
+   */
+  switch (t->tablet_v2->wlr_tool->type) {
+    case WLR_TABLET_TOOL_TYPE_MOUSE:
+    case WLR_TABLET_TOOL_TYPE_LENS:
+      wlr_cursor_move(cursor, t->tablet->wlr_device, dx, dy);
+      break;
+    default:
+      wlr_cursor_warp_absolute(cursor, t->tablet->wlr_device,
+                               change_x ? x : NAN,
+                               change_y ? y : NAN);
+      break;
+  }
+
+  /*
+   * Internal call (time == 0): updates selmon, drag icon, pointer focus
+   * without sending spurious wl_pointer.motion events to clients.
+   */
+  motionnotify(0, NULL, 0, 0, 0, 0);
+
+  /* Find the surface under the cursor and check tablet-v2 support. */
+  struct wlr_surface *surface = NULL;
+  double sx, sy;
+  xytonode(cursor->x, cursor->y, &surface, NULL, NULL, &sx, &sy);
+  if (surface && !wlr_surface_accepts_tablet_v2(surface, t->tablet->tablet_v2))
+    surface = NULL;
+
+  /* Handle proximity in/out when the focused surface changes. */
+  if (surface != t->curr_surface) {
+    if (t->curr_surface)
+      tablettoolleave(t);
+    if (surface)
+      tablettoolenter(t, surface, sx, sy);
+  }
+
+  if (t->curr_surface)
+    wlr_tablet_v2_tablet_tool_notify_motion(t->tablet_v2, sx, sy);
+}
+
+/*
+ * Tablet tool proximity event — fired when a tool enters or leaves the
+ * physical detection range of the tablet surface.
+ *
+ * The wlr_tablet_tool object is persistent across multiple proximity cycles
+ * (it represents the physical tool, not a single hover session).  We create
+ * our TabletTool wrapper on the first proximity and store it in
+ * wlr_tablet_tool->data for O(1) lookup in subsequent events.
+ */
+static void
+tablettoolproximity(struct wl_listener *listener, void *data)
+{
+  struct wlr_tablet_tool_proximity_event *event = data;
+  struct wlr_tablet_tool *wlr_tool = event->tool;
+
+  /* Lazy-init: create our wrapper once per physical tool. */
+  if (!wlr_tool->data) {
+    Tablet *tab = tabletfromdevice(&event->tablet->base);
+    if (!tab) {
+      wlr_log(WLR_ERROR, "tablettoolproximity: no Tablet found for device");
+      return;
+    }
+
+    TabletTool *t = ecalloc(1, sizeof(*t));
+    t->tablet   = tab;
+    t->tablet_v2 = wlr_tablet_tool_create(tablet_mgr, seat, wlr_tool);
+
+    t->destroy.notify = destroytablettool;
+    wl_signal_add(&wlr_tool->events.destroy, &t->destroy);
+
+    t->set_cursor.notify = tablettoolsetcursor;
+    wl_signal_add(&t->tablet_v2->events.set_cursor, &t->set_cursor);
+
+    /* surface_destroy link is inert until tablettoolenter registers it. */
+    wl_list_init(&t->surface_destroy.link);
+
+    wlr_tool->data = t;
+  }
+
+  TabletTool *t = wlr_tool->data;
+
+  switch (event->state) {
+    case WLR_TABLET_TOOL_PROXIMITY_IN:
+      /*
+     * Send initial position; tablettoolmotion will call tablettoolenter
+     * and notify_motion for the surface under the cursor.
+     */
+      tablettoolmotion(t, true, true, event->x, event->y, 0, 0, event->time_msec);
+      break;
+    case WLR_TABLET_TOOL_PROXIMITY_OUT:
+      if (t->curr_surface)
+        tablettoolleave(t);
+      break;
+  }
+}
+
+/*
+ * Tablet tool axis event — position, pressure, tilt, distance, etc.
+ *
+ * Each axis event constitutes a complete logical frame and must be closed
+ * with notify_frame so that clients (Krita, GIMP, …) process the batch.
+ */
+static void
+tablettoolaxis(struct wl_listener *listener, void *data)
+{
+  struct wlr_tablet_tool_axis_event *event = data;
+  TabletTool *t = event->tool->data;
+
+  if (!t) {
+    wlr_log(WLR_ERROR, "tablettoolaxis: tool not initialised");
+    return;
+  }
+
+  tablettoolmotion(t,
+                   event->updated_axes & WLR_TABLET_TOOL_AXIS_X,
+                   event->updated_axes & WLR_TABLET_TOOL_AXIS_Y,
+                   event->x, event->y, event->dx, event->dy, event->time_msec);
+
+  if (!t->curr_surface)
+    return;
+
+  if (event->updated_axes & WLR_TABLET_TOOL_AXIS_PRESSURE)
+    wlr_tablet_v2_tablet_tool_notify_pressure(t->tablet_v2, event->pressure);
+  if (event->updated_axes & WLR_TABLET_TOOL_AXIS_DISTANCE)
+    wlr_tablet_v2_tablet_tool_notify_distance(t->tablet_v2, event->distance);
+  if (event->updated_axes & WLR_TABLET_TOOL_AXIS_TILT_X)
+    t->tilt_x = event->tilt_x;
+  if (event->updated_axes & WLR_TABLET_TOOL_AXIS_TILT_Y)
+    t->tilt_y = event->tilt_y;
+  if (event->updated_axes & (WLR_TABLET_TOOL_AXIS_TILT_X | WLR_TABLET_TOOL_AXIS_TILT_Y))
+    wlr_tablet_v2_tablet_tool_notify_tilt(t->tablet_v2, t->tilt_x, t->tilt_y);
+  if (event->updated_axes & WLR_TABLET_TOOL_AXIS_ROTATION)
+    wlr_tablet_v2_tablet_tool_notify_rotation(t->tablet_v2, event->rotation);
+  if (event->updated_axes & WLR_TABLET_TOOL_AXIS_SLIDER)
+    wlr_tablet_v2_tablet_tool_notify_slider(t->tablet_v2, event->slider);
+  if (event->updated_axes & WLR_TABLET_TOOL_AXIS_WHEEL)
+    wlr_tablet_v2_tablet_tool_notify_wheel(t->tablet_v2, event->wheel_delta, 0);
+}
+
+/*
+ * Tablet tool tip event — tip touching / leaving the surface.
+ *
+ * When no tablet-v2 surface is focused we synthesise a pointer button event
+ * so that the tip can still be used to focus windows and interact with
+ * surfaces that do not implement the tablet protocol (e.g. the dwl bar,
+ * XWayland clients in Absolute Mode).
+ */
+static void
+tablettooltip(struct wl_listener *listener, void *data)
+{
+  struct wlr_tablet_tool_tip_event *event = data;
+  TabletTool *t = event->tool->data;
+
+  if (!t) {
+    wlr_log(WLR_ERROR, "tablettooltip: tool not initialised");
+    return;
+  }
+
+  if (!t->curr_surface) {
+    struct wlr_pointer_button_event fake = {
+      .button   = BTN_LEFT,
+      .state    = event->state == WLR_TABLET_TOOL_TIP_UP
+      ? WL_POINTER_BUTTON_STATE_RELEASED
+      : WL_POINTER_BUTTON_STATE_PRESSED,
+      .time_msec = event->time_msec,
+    };
+    buttonpress(NULL, &fake);
+  }
+
+  if (event->state == WLR_TABLET_TOOL_TIP_DOWN) {
+    wlr_tablet_v2_tablet_tool_notify_down(t->tablet_v2);
+    /*
+     * Start an implicit grab so that the surface receiving tip-down
+     * continues to receive motion and tip-up even if the cursor moves
+     * outside the surface while the tip is pressed (essential for drawing).
+     */
+    wlr_tablet_tool_v2_start_implicit_grab(t->tablet_v2);
+  } else {
+    wlr_tablet_v2_tablet_tool_notify_up(t->tablet_v2);
+  }
+}
+
+/*
+ * Tablet tool side-button event.
+ */
+static void
+tablettoolbutton(struct wl_listener *listener, void *data)
+{
+  struct wlr_tablet_tool_button_event *event = data;
+  TabletTool *t = event->tool->data;
+
+  if (!t) {
+    wlr_log(WLR_ERROR, "tablettoolbutton: tool not initialised");
+    return;
+  }
+
+  wlr_tablet_v2_tablet_tool_notify_button(t->tablet_v2, event->button,
+                                          (enum zwp_tablet_pad_v2_button_state)event->state);
 }
 
 #ifdef XWAYLAND
