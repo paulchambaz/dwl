@@ -3348,34 +3348,32 @@ tabletapplymap(double x, double y, struct wlr_input_device *dev)
 {
   if (tabletmaptosurface && tablet_curr_surface) {
     Client *p;
+    struct wlr_box geom = {0};
     toplevel_from_wlr_surface(tablet_curr_surface, &p, NULL);
     if (p) {
       for (; client_get_parent(p); p = client_get_parent(p));
-      struct wlr_box geom = {
-        .x      = p->geom.x + p->bw,
-        .y      = p->geom.y + p->bw,
-        .width  = p->geom.width  - 2 * p->bw,
-        .height = p->geom.height - 2 * p->bw,
-      };
-      wlr_cursor_map_input_to_region(cursor, dev, &geom);
-      wlr_cursor_map_input_to_output(cursor, dev, NULL);
-      return;
+      geom.x      = p->geom.x + p->bw;
+      geom.y      = p->geom.y + p->bw;
+      geom.width  = p->geom.width  - 2 * p->bw;
+      geom.height = p->geom.height - 2 * p->bw;
     }
+    wlr_cursor_map_input_to_region(cursor, dev, &geom);
+    wlr_cursor_map_input_to_output(cursor, dev, NULL);
+    return;
   }
 
   if (tabletoutput) {
     Monitor *m;
     wl_list_for_each(m, &mons, link) {
       if (strcmp(m->wlr_output->name, tabletoutput) == 0) {
-        struct wlr_box *ob =
-          wlr_output_layout_get_box(output_layout, m->wlr_output);
-        if (ob) {
-          struct wlr_box region = {
-            .x      = 0,
-            .y      = 0,
-            .width  = ob->x + ob->width,
-            .height = ob->y + ob->height,
-          };
+        struct wlr_box ob = {0};
+        wlr_output_layout_get_box(output_layout, m->wlr_output, &ob);
+        if (ob.width > 0 && ob.height > 0) {
+          struct wlr_box region = {0};
+          region.x      = 0;
+          region.y      = 0;
+          region.width  = ob.x + ob.width;
+          region.height = ob.y + ob.height;
           wlr_cursor_map_input_to_region(cursor, dev, &region);
           wlr_cursor_map_input_to_output(cursor, dev, NULL);
           return;
