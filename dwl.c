@@ -3892,7 +3892,7 @@ static void
 destroytablettoolsurface(struct wl_listener *listener, void *data)
 {
   TabletTool *t = wl_container_of(listener, t, surface_destroy);
-  /* The listener was removed by wlroots on surface destroy; just reset. */
+  wl_list_remove(&t->surface_destroy.link);
   wl_list_init(&t->surface_destroy.link);
   t->curr_surface = NULL;
 }
