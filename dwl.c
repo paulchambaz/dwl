@@ -152,6 +152,7 @@ struct Client {
 	uint32_t tags;
 	int isfloating, isurgent, isfullscreen;
 	int isterm, noswallow;
+	int swallowtag; /* pending tag this client claimed at map time; 0 = none */
 	uint32_t resize; /* configure serial of a pending resize */
 	pid_t pid;
 	Client *swallowing;  /* client being hidden */
@@ -403,6 +404,7 @@ static void outputmgrapply(struct wl_listener *listener, void *data);
 static void outputmgrapplyortest(struct wlr_output_configuration_v1 *config, int test);
 static void outputmgrtest(struct wl_listener *listener, void *data);
 static pid_t parentpid(pid_t pid);
+static int getenvtag(pid_t pid);
 static void pointerfocus(Client *c, struct wlr_surface *surface,
 		double sx, double sy, uint32_t time);
 static void powermgrsetmode(struct wl_listener *listener, void *data);
@@ -425,6 +427,9 @@ static void setpsel(struct wl_listener *listener, void *data);
 static void setsel(struct wl_listener *listener, void *data);
 static void setup(void);
 static void spawn(const Arg *arg);
+static int isknownterminal(const char *cmd);
+static int swallowtag_push(void);
+static int swallowtag_pop(void);
 static void startdrag(struct wl_listener *listener, void *data);
 static int statusin(int fd, unsigned int mask, void *data);
 static void tag(const Arg *arg);
@@ -454,6 +459,7 @@ static void xytonode(double x, double y, struct wlr_surface **psurface,
 static void zoom(const Arg *arg);
 static void swallow(Client *c, Client *toswallow);
 static Client *termforwin(Client *c);
+static Client *clientfortag(int tag);
 static void attachpadtotablet(TabletPad *p, Tablet *t);
 static void createtablet(struct wlr_input_device *device);
 static void createtabletpad(struct wlr_input_device *device);
@@ -590,6 +596,15 @@ static struct wlr_xwayland *xwayland;
 static pid_t *autostart_pids;
 static size_t autostart_len;
 
+/* swallow tagging: lets spawn() mark a newly-launched terminal so a later
+ * GUI app it spawns can be swallowed by the exact right window, even when
+ * multiple terminal windows share one underlying process (e.g. footclient
+ * connecting to a foot --server instance) and can't be told apart by pid */
+#define SWALLOWTAG_CAP 8
+static int swallowtag_next = 1; /* 0 is reserved to mean "no tag" */
+static int swallowtag_pending[SWALLOWTAG_CAP];
+static unsigned int swallowtag_head, swallowtag_tail, swallowtag_count;
+
 /* configuration, allows nested code to access above variables */
 #include "config.h"
 
@@ -644,10 +659,21 @@ applyrules(Client *c)
 		}
 	}
 
+	/* Claim a pending swallow tag for this terminal, exactly once: applyrules()
+	 * runs again from mapnotify() after the first call from commitnotify(), so
+	 * guard against popping a second, unrelated tag on the second pass. */
+	if (c->isterm && !c->swallowtag)
+		c->swallowtag = swallowtag_pop();
+
   c->isfloating |= client_is_float_type(c);
   if (enableautoswallow && !c->noswallow && !c->isfloating &&
     !c->surface.xdg->initial_commit) {
-    Client *p = termforwin(c);
+    Client *p = NULL;
+    int swtag = getenvtag(c->pid);
+    if (swtag)
+      p = clientfortag(swtag);
+    if (!p)
+      p = termforwin(c); /* fallback: untagged launch (e.g. manual footclient) */
     if (p)
       swallow(c, p);
   }
@@ -2583,6 +2609,47 @@ parentpid(pid_t pid)
 	return (pid_t)v;
 }
 
+int
+getenvtag(pid_t pid)
+{
+	char path[64];
+	char buf[4096];
+	int fd, tag = 0;
+	ssize_t n, total = 0;
+	static const char key[] = "DWL_TERM_TAG=";
+	const size_t keylen = sizeof(key) - 1;
+	char *p, *end;
+
+	if (!pid)
+		return 0;
+
+	snprintf(path, sizeof(path), "/proc/%u/environ", (unsigned)pid);
+	if ((fd = open(path, O_RDONLY)) < 0)
+		return 0; /* process gone, zombie, or permission denied */
+
+	while (total < (ssize_t)sizeof(buf) - 1) {
+		n = read(fd, buf + total, sizeof(buf) - 1 - total);
+		if (n <= 0)
+			break;
+		total += n;
+	}
+	close(fd);
+
+	if (total <= 0)
+		return 0;
+	buf[total] = '\0';
+
+	/* environ is a sequence of NUL-separated "KEY=VALUE" records */
+	end = buf + total;
+	for (p = buf; p < end; p += strlen(p) + 1) {
+		if (!strncmp(p, key, keylen)) {
+			tag = atoi(p + keylen);
+			break;
+		}
+	}
+	return tag;
+}
+
 void
 pointerfocus(Client *c, struct wlr_surface *surface, double sx, double sy,
 		uint32_t time)
@@ -3116,16 +3183,101 @@ setup(void)
 #endif
 }
 
+int
+isknownterminal(const char *cmd)
+{
+	const Rule *r;
+	for (r = rules; r < END(rules); r++)
+		if (r->isterm && r->id && strstr(cmd, r->id))
+			return 1;
+	return 0;
+}
+
+int
+swallowtag_push(void)
+{
+	int swtag = swallowtag_next++;
+	if (swallowtag_next <= 0) /* defensive overflow guard */
+		swallowtag_next = 1;
+
+	if (swallowtag_count == SWALLOWTAG_CAP) {
+		/* ring full: drop the oldest pending tag to make room */
+		swallowtag_head = (swallowtag_head + 1) % SWALLOWTAG_CAP;
+		swallowtag_count--;
+	}
+	swallowtag_pending[swallowtag_tail] = swtag;
+	swallowtag_tail = (swallowtag_tail + 1) % SWALLOWTAG_CAP;
+	swallowtag_count++;
+	return swtag;
+}
+
+int
+swallowtag_pop(void)
+{
+	int swtag;
+	if (swallowtag_count == 0)
+		return 0;
+	swtag = swallowtag_pending[swallowtag_head];
+	swallowtag_head = (swallowtag_head + 1) % SWALLOWTAG_CAP;
+	swallowtag_count--;
+	return swtag;
+}
+
 void
 spawn(const Arg *arg)
 {
+	char **argv = (char **)arg->v;
+	int argc = 0;
+
+	while (argv[argc])
+		argc++;
+
+	/* A bare invocation of a command recognized as a terminal via an isterm
+	 * rule in rules[] (e.g. plain "footclient", opening an interactive
+	 * shell) gets wrapped so the new shell exports a unique tag; a later GUI
+	 * app launched from that shell inherits it, letting applyrules() swallow
+	 * the exact right window even when multiple terminal windows share one
+	 * underlying process (e.g. footclient windows connected to one
+	 * foot --server). Invocations that already run a specific program
+	 * (e.g. "footclient nvim") are left untouched: there's no shell to
+	 * export the tag into, and appending our wrapper after nvim's own argv
+	 * would corrupt what's actually being run. */
+	if (argc == 1 && isknownterminal(argv[0])) {
+		char tagbuf[64];
+		char **wrapped;
+		int i, swtag;
+
+		swtag = swallowtag_push();
+		snprintf(tagbuf, sizeof(tagbuf),
+				"export DWL_TERM_TAG=%d; exec \"$SHELL\"", swtag);
+
+		wrapped = ecalloc(argc + 4, sizeof(char *));
+		for (i = 0; i < argc; i++)
+			wrapped[i] = argv[i];
+		wrapped[argc]     = "sh";
+		wrapped[argc + 1] = "-c";
+		wrapped[argc + 2] = tagbuf;
+		wrapped[argc + 3] = NULL;
+
+		if (fork() == 0) {
+			close(STDIN_FILENO);
+			open("/dev/null", O_RDWR);
+			dup2(STDERR_FILENO, STDOUT_FILENO);
+			setsid();
+			execvp(wrapped[0], wrapped);
+			die("dwl: execvp %s failed:", wrapped[0]);
+		}
+		free(wrapped);
+		return;
+	}
+
 	if (fork() == 0) {
 		close(STDIN_FILENO);
 		open("/dev/null", O_RDWR);
 		dup2(STDERR_FILENO, STDOUT_FILENO);
 		setsid();
-		execvp(((char **)arg->v)[0], (char **)arg->v);
-		die("dwl: execvp %s failed:", ((char **)arg->v)[0]);
+		execvp(argv[0], argv);
+		die("dwl: execvp %s failed:", argv[0]);
 	}
 }
 
@@ -3171,11 +3323,17 @@ swallow(Client *c, Client *toswallow)
 	if (c == toswallow)
 		return;
 
+	/* Already swallowing this exact target (e.g. applyrules() re-ran because
+	 * the client's surface unmapped and remapped, which some apps do to
+	 * fake minimize-to-tray): nothing to do, and falling through to the
+	 * unswallow branch below would wrongly undo a still-valid swallow. */
+	if (c->swallowing && c->swallowing == toswallow)
+		return;
+
 	/* Swallow */
 	if (toswallow && !c->swallowing) {
 		c->swallowing = toswallow;
 		toswallow->swallowedby = c;
-		toswallow->mon = c->mon;
 		toswallow->mon = c->mon;
 		wl_list_remove(&c->link);
 		wl_list_insert(&c->swallowing->link, &c->link);
@@ -3254,6 +3412,21 @@ termforwin(Client *c)
 		}
 	}
 
+	return NULL;
+}
+
+Client *
+clientfortag(int swtag)
+{
+	Client *p;
+
+	if (!swtag)
+		return NULL;
+
+	wl_list_for_each(p, &clients, link) {
+		if (p->isterm && p->swallowtag == swtag && !p->swallowedby)
+			return p;
+	}
 	return NULL;
 }
 
