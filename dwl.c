@@ -4080,8 +4080,27 @@ destroytablettool(struct wl_listener *listener, void *data)
   TabletTool *t  = wl_container_of(listener, t, destroy);
   struct wlr_tablet_tool *wlr_tool = data;
 
-  if (t->curr_surface)
-    tablettoolleave(t);
+  /*
+   * wlroots registers its own listener on wlr_tool->events.destroy inside
+   * wlr_tablet_tool_create(), before we register ours below.  Listeners
+   * fire in registration order, so by the time we get here wlroots has
+   * already sent zwp_tablet_tool_v2.removed to every client and freed
+   * t->tablet_v2.  Do NOT call tablettoolleave(t) here: it would invoke
+   * wlr_tablet_v2_tablet_tool_notify_proximity_out(t->tablet_v2), a
+   * use-after-free on that already-freed struct.  Pads are unaffected
+   * (their wlr_tablet_v2_tablet_pad is a separate object), so still tell
+   * them the tool's surface was left.
+   */
+  if (t->curr_surface) {
+    TabletPad *pad;
+    wl_list_for_each(pad, &tablet_pads, link)
+      if (pad->tablet == t->tablet)
+        wlr_tablet_v2_tablet_pad_notify_leave(pad->tablet_v2, t->curr_surface);
+
+    wl_list_remove(&t->surface_destroy.link);
+    wl_list_init(&t->surface_destroy.link);
+    t->curr_surface = NULL;
+  }
 
   wl_list_remove(&t->destroy.link);
   wl_list_remove(&t->set_cursor.link);
@@ -4333,6 +4352,20 @@ tablettooltip(struct wl_listener *listener, void *data)
       .time_msec = event->time_msec,
     };
     buttonpress(NULL, &fake);
+  } else if (event->state == WLR_TABLET_TOOL_TIP_DOWN) {
+    /*
+     * buttonpress() is what normally does click-to-focus, but it's only
+     * reached above when the surface doesn't speak tablet-v2.  Clients
+     * that do (e.g. Krita) never go through buttonpress(), so pressing
+     * the tip on them never moved keyboard focus.  Mirror buttonpress()'s
+     * unconditional click-to-focus here so tip-down behaves like a click.
+     */
+    Client *c;
+    if (!locked) {
+      xytonode(cursor->x, cursor->y, NULL, &c, NULL, NULL, NULL);
+      if (c && (!client_is_unmanaged(c) || client_wants_focus(c)))
+        focusclient(c, 1);
+    }
   }
 
   if (event->state == WLR_TABLET_TOOL_TIP_DOWN) {
