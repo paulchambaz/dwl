@@ -4230,8 +4230,12 @@ tablettoolmotion(TabletTool *t, bool change_x, bool change_y,
   /*
    * MOUSE/LENS tools send relative deltas; all other tool types
    * (pen, eraser, brush, …) send absolute normalised coordinates.
+   *
+   * Read the type off t->wlr_tool, not t->tablet_v2: the latter is NULL until
+   * the deferred createtablettoolv2 runs, and the cursor must track the pen
+   * throughout that window.
    */
-  switch (t->tablet_v2->wlr_tool->type) {
+  switch (t->wlr_tool->type) {
     case WLR_TABLET_TOOL_TYPE_MOUSE:
     case WLR_TABLET_TOOL_TYPE_LENS:
       wlr_cursor_move(cursor, t->tablet->wlr_device, dx, dy);
@@ -4310,7 +4314,12 @@ createtablettoolv2(TabletTool *t)
     t->create_timer = NULL;
   }
 
-  t->tablet_v2 = wlr_tablet_tool_create(tablet_mgr, seat, t->wlr_tool);
+  /* NULL for tool types tablet-v2 has no representation for (e.g. TOTEM). */
+  if (!(t->tablet_v2 = wlr_tablet_tool_create(tablet_mgr, seat, t->wlr_tool))) {
+    wlr_log(WLR_ERROR, "createtablettoolv2: tool type %d not supported by tablet-v2",
+            t->wlr_tool->type);
+    return;
+  }
 
   t->set_cursor.notify = tablettoolsetcursor;
   wl_signal_add(&t->tablet_v2->events.set_cursor, &t->set_cursor);
@@ -4486,6 +4495,10 @@ tablettooltip(struct wl_listener *listener, void *data)
     buttonpress(NULL, &fake);
     return;
   }
+
+  /* Creation above can fail for unsupported tool types; nothing to notify. */
+  if (!t->tablet_v2)
+    return;
 
   if (event->state == WLR_TABLET_TOOL_TIP_DOWN) {
     /*
