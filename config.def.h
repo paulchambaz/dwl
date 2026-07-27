@@ -6,6 +6,8 @@
 /* appearance */
 static const char *tabletoutput            = NULL; /* lock tablet to this output name; NULL = full layout (let OTD handle) */
 static const int tabletmaptosurface        = 0;  /* map tablet input to surface(1) or monitor(0) */
+static const int tablettooladddelay         = 60; /* ms to hold back tool_added after a tablet tool is (re)created;
+                                                    works around a Qt use-after-free (see createtablettoolv2) */
 static const int sloppyfocus               = 1;  /* focus follows mouse */
 static const int bypass_surface_visibility = 0;  /* 1 means idle inhibitors will disable idle tracking even if it's surface isn't visible  */
 static const int smartborders              = 1;

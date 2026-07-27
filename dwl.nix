@@ -74,6 +74,11 @@ let
       tablet = {
         map_to_surface = false;
         tablet_output = null;
+        # Milliseconds to hold back zwp_tablet_seat_v2.tool_added after a tablet
+        # tool is (re)created, working around a use-after-free in Qt's Wayland
+        # tablet backend (see createtablettoolv2 in dwl.c).  Raise it if Qt
+        # applications still crash on pen hover; 0 disables the delay.
+        add_delay = 60;
       };
 
       keyboard = {
@@ -1224,6 +1229,7 @@ let
           ((hex >> 8)  & 0xFF) / 255.0f, (hex & 0xFF)         / 255.0f }
 
       static const int          tabletmaptosurface        = ${formatValue cfg.input.tablet.map_to_surface};
+      static const int          tablettooladddelay        = ${formatValue cfg.input.tablet.add_delay};
       static const char        *tabletoutput              = ${
         if cfg.input.tablet.tablet_output == null then "NULL" else ''"${cfg.input.tablet.tablet_output}"''
       };

@@ -299,11 +299,14 @@ typedef struct {
 
 typedef struct {
 	struct wlr_tablet_v2_tablet_tool *tablet_v2;
+	struct wlr_tablet_tool *wlr_tool;
 	Tablet *tablet;
 	struct wlr_surface *curr_surface;
 	struct wl_listener destroy;
 	struct wl_listener surface_destroy;
 	struct wl_listener set_cursor;
+	/* Pending deferred creation of tablet_v2; see tablettooladddelay. */
+	struct wl_event_source *create_timer;
 	double tilt_x, tilt_y;
 	/*
 	 * State the focused client believes is active.  Tracked so it can be
@@ -473,6 +476,8 @@ static Client *clientfortag(int tag);
 static void attachpadtotablet(TabletPad *p, Tablet *t);
 static void createtablet(struct wlr_input_device *device);
 static void createtabletpad(struct wlr_input_device *device);
+static void createtablettoolv2(TabletTool *t);
+static int tablettooladdtimer(void *data);
 static void destroytablet(struct wl_listener *listener, void *data);
 static void destroytabletpad(struct wl_listener *listener, void *data);
 static void destroytablettool(struct wl_listener *listener, void *data);
@@ -4102,6 +4107,13 @@ destroytablettool(struct wl_listener *listener, void *data)
 
   tablettoolleave(t);
 
+  /*
+   * A tool that came and went inside the deferral window was never advertised,
+   * so clients see no tool_added/removed pair at all.
+   */
+  if (t->create_timer)
+    wl_event_source_remove(t->create_timer);
+
   /* Likewise for an outstanding emulated press: nothing else will release it. */
   if (t->sim_tip) {
     struct wlr_pointer_button_event fake = {
@@ -4237,6 +4249,10 @@ tablettoolmotion(TabletTool *t, bool change_x, bool change_y,
    */
   motionnotify(0, NULL, 0, 0, 0, 0);
 
+  /* Not advertised to clients yet — the cursor moved, that is all we owe. */
+  if (!t->tablet_v2)
+    return;
+
   /* Find the surface under the cursor and check tablet-v2 support. */
   struct wlr_surface *surface = NULL;
   double sx, sy;
@@ -4254,6 +4270,62 @@ tablettoolmotion(TabletTool *t, bool change_x, bool change_y,
 
   if (t->curr_surface)
     wlr_tablet_v2_tablet_tool_notify_motion(t->tablet_v2, sx, sy);
+}
+
+/*
+ * Advertise the tool to clients (zwp_tablet_seat_v2.tool_added) and enter
+ * whatever surface is under the cursor.
+ *
+ * This is deliberately deferred by tablettooladddelay milliseconds after the
+ * tool appears, and here is why.  A tool with no hardware serial is "not
+ * unique" to libinput, so wlroots destroys the wlr_tablet_tool on every
+ * proximity-out (backend/libinput/tablet_tool.c) and builds a fresh one on the
+ * next proximity-in.  Clients therefore see removed/tool_added on every hover
+ * cycle.  Qt's Wayland backend cannot survive that when both land in one
+ * dispatch batch: zwp_tablet_tool_v2.frame queues a leave-proximity event
+ * holding the QPointingDevice, and the following tool_added runs
+ * qDeleteAll(m_deadTools) which deletes that very device before the queued
+ * event is processed — a use-after-free that crashes Krita in
+ * QPointingDevicePrivate::pointById.  Holding tool_added back lets the client
+ * drain the queued event first.
+ *
+ * This is a workaround for a client bug (qtbase qwaylandtabletv2.cpp), not a
+ * protocol requirement; if Qt is ever fixed, this can go.  The delay is a
+ * heuristic: it must exceed the client's main-loop latency, so raise it if
+ * crashes persist.  The cursor keeps tracking the pen throughout — only the
+ * tablet-protocol events wait — and a tip-down forces creation immediately so
+ * a fast tap is never delivered as an emulated pointer click.
+ */
+static void
+createtablettoolv2(TabletTool *t)
+{
+  struct wlr_surface *surface = NULL;
+  double sx, sy;
+
+  if (t->tablet_v2)
+    return;
+
+  if (t->create_timer) {
+    wl_event_source_remove(t->create_timer);
+    t->create_timer = NULL;
+  }
+
+  t->tablet_v2 = wlr_tablet_tool_create(tablet_mgr, seat, t->wlr_tool);
+
+  t->set_cursor.notify = tablettoolsetcursor;
+  wl_signal_add(&t->tablet_v2->events.set_cursor, &t->set_cursor);
+
+  /* The pen has been moving while we waited; enter wherever it ended up. */
+  xytonode(cursor->x, cursor->y, &surface, NULL, NULL, &sx, &sy);
+  if (surface && wlr_surface_accepts_tablet_v2(surface, t->tablet->tablet_v2))
+    tablettoolenter(t, surface, sx, sy);
+}
+
+static int
+tablettooladdtimer(void *data)
+{
+  createtablettoolv2(data);
+  return 0;
 }
 
 /*
@@ -4281,6 +4353,7 @@ tablettoolproximity(struct wl_listener *listener, void *data)
 
     TabletTool *t = ecalloc(1, sizeof(*t));
     t->tablet   = tab;
+    t->wlr_tool = wlr_tool;
 
     /*
      * Register before wlr_tablet_tool_create(): that call installs wlroots'
@@ -4291,15 +4364,22 @@ tablettoolproximity(struct wl_listener *listener, void *data)
     t->destroy.notify = destroytablettool;
     wl_signal_add(&wlr_tool->events.destroy, &t->destroy);
 
-    t->tablet_v2 = wlr_tablet_tool_create(tablet_mgr, seat, wlr_tool);
-
-    t->set_cursor.notify = tablettoolsetcursor;
-    wl_signal_add(&t->tablet_v2->events.set_cursor, &t->set_cursor);
-
-    /* surface_destroy link is inert until tablettoolenter registers it. */
+    /* Both links stay inert until the deferred creation arms them. */
     wl_list_init(&t->surface_destroy.link);
+    wl_list_init(&t->set_cursor.link);
 
     wlr_tool->data = t;
+
+    /*
+     * Advertise the tool to clients only after a delay; see createtablettoolv2.
+     * A delay of 0 means "no workaround" — wl_event_source_timer_update would
+     * read it as "disarm" and the tool would never be advertised at all.
+     */
+    if (tablettooladddelay > 0
+        && (t->create_timer = wl_event_loop_add_timer(event_loop, tablettooladdtimer, t)))
+      wl_event_source_timer_update(t->create_timer, tablettooladddelay);
+    else
+      createtablettoolv2(t);
   }
 
   TabletTool *t = wlr_tool->data;
@@ -4382,6 +4462,13 @@ tablettooltip(struct wl_listener *listener, void *data)
   }
 
   /*
+   * A tap this soon after proximity-in would otherwise be delivered as an
+   * emulated pointer click, so stop waiting and advertise the tool now.
+   */
+  if (!t->tablet_v2)
+    createtablettoolv2(t);
+
+  /*
    * The emulated press and its release must take the same path: the tool can
    * gain or lose a tablet-v2 surface between tip-down and tip-up (proximity
    * churn recreates the tool constantly), and deciding per-event would leave
@@ -4460,8 +4547,10 @@ tablettoolbutton(struct wl_listener *listener, void *data)
     }
   }
 
-  wlr_tablet_v2_tablet_tool_notify_button(t->tablet_v2, event->button,
-                                          (enum zwp_tablet_pad_v2_button_state)event->state);
+  /* Held buttons recorded above are replayed by tablettoolenter. */
+  if (t->tablet_v2)
+    wlr_tablet_v2_tablet_tool_notify_button(t->tablet_v2, event->button,
+                                            (enum zwp_tablet_pad_v2_button_state)event->state);
 }
 
 #ifdef XWAYLAND
