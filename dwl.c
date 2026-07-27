@@ -305,6 +305,16 @@ typedef struct {
 	struct wl_listener surface_destroy;
 	struct wl_listener set_cursor;
 	double tilt_x, tilt_y;
+	/*
+	 * State the focused client believes is active.  Tracked so it can be
+	 * wound back before proximity_out and replayed after proximity_in.
+	 */
+	uint32_t buttons[16];
+	size_t nbuttons;
+	int tip_down;
+	/* Tip-down was delivered as an emulated pointer press; the matching
+	 * release must take the same path regardless of what is focused now. */
+	int sim_tip;
 } TabletTool;
 
 typedef struct {
@@ -4071,8 +4081,18 @@ destroytablettoolsurface(struct wl_listener *listener, void *data)
 }
 
 /*
- * Called when the logical wlr_tablet_tool is destroyed (e.g. tablet removed).
- * Frees our wrapper; wlroots frees the wlr_tablet_tool itself after this.
+ * Called when the logical wlr_tablet_tool is destroyed.  wlroots does this
+ * whenever the tool leaves proximity and nothing else references it, so this
+ * runs constantly during normal drawing — not just on unplug.
+ *
+ * We register this listener on wlr_tool->events.destroy *before* calling
+ * wlr_tablet_tool_create() (see tablettoolproximity), so it fires ahead of
+ * the listener wlroots installs there.  t->tablet_v2 is therefore still
+ * alive and tablettoolleave() can do a full, protocol-correct teardown:
+ * clients see the tip and buttons released, then proximity_out, and only
+ * then zwp_tablet_tool_v2.removed.  Emitting a bare removed while the tool
+ * is still in proximity leaves clients to synthesise the leave themselves,
+ * which crashes Qt applications (Krita) in processTabletLeaveProximityEvent.
  */
 static void
 destroytablettool(struct wl_listener *listener, void *data)
@@ -4080,28 +4100,18 @@ destroytablettool(struct wl_listener *listener, void *data)
   TabletTool *t  = wl_container_of(listener, t, destroy);
   struct wlr_tablet_tool *wlr_tool = data;
 
-  /*
-   * wlroots registers its own listener on wlr_tool->events.destroy inside
-   * wlr_tablet_tool_create(), before we register ours below.  Listeners
-   * fire in registration order, so by the time we get here wlroots has
-   * already sent zwp_tablet_tool_v2.removed to every client and freed
-   * t->tablet_v2.  Do NOT call tablettoolleave(t) here: it would invoke
-   * wlr_tablet_v2_tablet_tool_notify_proximity_out(t->tablet_v2), a
-   * use-after-free on that already-freed struct.  Pads are unaffected
-   * (their wlr_tablet_v2_tablet_pad is a separate object), so still tell
-   * them the tool's surface was left.
-   */
-  if (t->curr_surface) {
-    TabletPad *pad;
-    wl_list_for_each(pad, &tablet_pads, link)
-      if (pad->tablet == t->tablet)
-        wlr_tablet_v2_tablet_pad_notify_leave(pad->tablet_v2, t->curr_surface);
+  tablettoolleave(t);
 
-    wl_list_remove(&t->surface_destroy.link);
-    wl_list_init(&t->surface_destroy.link);
-    t->curr_surface = NULL;
+  /* Likewise for an outstanding emulated press: nothing else will release it. */
+  if (t->sim_tip) {
+    struct wlr_pointer_button_event fake = {
+      .button = BTN_LEFT,
+      .state  = WL_POINTER_BUTTON_STATE_RELEASED,
+    };
+    buttonpress(NULL, &fake);
   }
 
+  wl_list_remove(&t->surface_destroy.link);
   wl_list_remove(&t->destroy.link);
   wl_list_remove(&t->set_cursor.link);
   wlr_tool->data = NULL;
@@ -4126,15 +4136,25 @@ tablettoolsetcursor(struct wl_listener *listener, void *data)
  * Notify all pads associated with t->tablet that they have left a surface,
  * send proximity_out to the client, and remove the surface-destroy listener.
  *
- * TODO: the protocol requires that any buttons still held be released before
- *       the proximity_out event.  That requires per-tool button tracking and
- *       is left as a future improvement.
+ * The protocol requires that everything the client believes is held be
+ * released before proximity_out: the tip first, then each button.  Otherwise
+ * the client is left mid-stroke with a stuck tip or button.  The state is
+ * kept on the tool (not cleared here) so tablettoolenter can replay it onto
+ * whatever surface the tool moves to.
  */
 static void
 tablettoolleave(TabletTool *t)
 {
+  size_t i;
+
   if (!t->curr_surface)
     return;
+
+  if (t->tip_down)
+    wlr_tablet_v2_tablet_tool_notify_up(t->tablet_v2);
+  for (i = 0; i < t->nbuttons; i++)
+    wlr_tablet_v2_tablet_tool_notify_button(t->tablet_v2, t->buttons[i],
+                                            ZWP_TABLET_PAD_V2_BUTTON_STATE_RELEASED);
 
   TabletPad *pad;
   wl_list_for_each(pad, &tablet_pads, link)
@@ -4151,10 +4171,15 @@ tablettoolleave(TabletTool *t)
 /*
  * Notify all pads that they have entered a surface, send proximity_in to the
  * client, and register a listener so we know if the surface is destroyed.
+ *
+ * Any tip or buttons still physically held are replayed onto the new surface
+ * after proximity_in, mirroring the release done in tablettoolleave, so a
+ * stroke that crosses a surface boundary stays consistent for both clients.
  */
 static void
 tablettoolenter(TabletTool *t, struct wlr_surface *surface, double sx, double sy)
 {
+  size_t i;
   TabletPad *pad;
   wl_list_for_each(pad, &tablet_pads, link)
   if (pad->tablet == t->tablet)
@@ -4163,6 +4188,12 @@ tablettoolenter(TabletTool *t, struct wlr_surface *surface, double sx, double sy
 
   wlr_tablet_v2_tablet_tool_notify_proximity_in(t->tablet_v2,
                                                 t->tablet->tablet_v2, surface);
+
+  if (t->tip_down)
+    wlr_tablet_v2_tablet_tool_notify_down(t->tablet_v2);
+  for (i = 0; i < t->nbuttons; i++)
+    wlr_tablet_v2_tablet_tool_notify_button(t->tablet_v2, t->buttons[i],
+                                            ZWP_TABLET_PAD_V2_BUTTON_STATE_PRESSED);
 
   t->surface_destroy.notify = destroytablettoolsurface;
   wl_signal_add(&surface->events.destroy, &t->surface_destroy);
@@ -4250,10 +4281,17 @@ tablettoolproximity(struct wl_listener *listener, void *data)
 
     TabletTool *t = ecalloc(1, sizeof(*t));
     t->tablet   = tab;
-    t->tablet_v2 = wlr_tablet_tool_create(tablet_mgr, seat, wlr_tool);
 
+    /*
+     * Register before wlr_tablet_tool_create(): that call installs wlroots'
+     * own destroy listener, and listeners fire in registration order.  Going
+     * first means destroytablettool() still has a live t->tablet_v2 and can
+     * send proximity_out before wlroots sends removed.
+     */
     t->destroy.notify = destroytablettool;
     wl_signal_add(&wlr_tool->events.destroy, &t->destroy);
+
+    t->tablet_v2 = wlr_tablet_tool_create(tablet_mgr, seat, wlr_tool);
 
     t->set_cursor.notify = tablettoolsetcursor;
     wl_signal_add(&t->tablet_v2->events.set_cursor, &t->set_cursor);
@@ -4343,7 +4381,13 @@ tablettooltip(struct wl_listener *listener, void *data)
     return;
   }
 
-  if (!t->curr_surface) {
+  /*
+   * The emulated press and its release must take the same path: the tool can
+   * gain or lose a tablet-v2 surface between tip-down and tip-up (proximity
+   * churn recreates the tool constantly), and deciding per-event would leave
+   * a synthesised BTN_LEFT press without its release, sticking the button.
+   */
+  if (event->state == WLR_TABLET_TOOL_TIP_UP ? t->sim_tip : !t->curr_surface) {
     struct wlr_pointer_button_event fake = {
       .button   = BTN_LEFT,
       .state    = event->state == WLR_TABLET_TOOL_TIP_UP
@@ -4351,8 +4395,12 @@ tablettooltip(struct wl_listener *listener, void *data)
       : WL_POINTER_BUTTON_STATE_PRESSED,
       .time_msec = event->time_msec,
     };
+    t->sim_tip = event->state != WLR_TABLET_TOOL_TIP_UP;
     buttonpress(NULL, &fake);
-  } else if (event->state == WLR_TABLET_TOOL_TIP_DOWN) {
+    return;
+  }
+
+  if (event->state == WLR_TABLET_TOOL_TIP_DOWN) {
     /*
      * buttonpress() is what normally does click-to-focus, but it's only
      * reached above when the surface doesn't speak tablet-v2.  Clients
@@ -4366,9 +4414,8 @@ tablettooltip(struct wl_listener *listener, void *data)
       if (c && (!client_is_unmanaged(c) || client_wants_focus(c)))
         focusclient(c, 1);
     }
-  }
 
-  if (event->state == WLR_TABLET_TOOL_TIP_DOWN) {
+    t->tip_down = 1;
     wlr_tablet_v2_tablet_tool_notify_down(t->tablet_v2);
     /*
      * Start an implicit grab so that the surface receiving tip-down
@@ -4377,22 +4424,40 @@ tablettooltip(struct wl_listener *listener, void *data)
      */
     wlr_tablet_tool_v2_start_implicit_grab(t->tablet_v2);
   } else {
+    t->tip_down = 0;
     wlr_tablet_v2_tablet_tool_notify_up(t->tablet_v2);
   }
 }
 
 /*
  * Tablet tool side-button event.
+ *
+ * Held buttons are recorded so tablettoolleave/tablettoolenter can release
+ * and replay them across a surface change.  The list is kept even when no
+ * surface is focused: the tool may enter one while a button is still down.
  */
 static void
 tablettoolbutton(struct wl_listener *listener, void *data)
 {
   struct wlr_tablet_tool_button_event *event = data;
   TabletTool *t = event->tool->data;
+  size_t i;
 
   if (!t) {
     wlr_log(WLR_ERROR, "tablettoolbutton: tool not initialised");
     return;
+  }
+
+  if (event->state == WLR_BUTTON_PRESSED) {
+    if (t->nbuttons < LENGTH(t->buttons))
+      t->buttons[t->nbuttons++] = event->button;
+  } else {
+    for (i = 0; i < t->nbuttons; i++) {
+      if (t->buttons[i] != event->button)
+        continue;
+      t->buttons[i] = t->buttons[--t->nbuttons];
+      break;
+    }
   }
 
   wlr_tablet_v2_tablet_tool_notify_button(t->tablet_v2, event->button,
