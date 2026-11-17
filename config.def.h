@@ -30,6 +30,11 @@ static const float rootcolor[]             = COLOR(0x000000ff);
 static const float fullscreen_bg[]         = {0.0f, 0.0f, 0.0f, 1.0f}; /* You can also use glsl colors */
 static int enableautoswallow = 1; /* enables autoswallowing newly spawned clients */
 static float swallowborder = 1.0f; /* add this multiplied by borderpx to border when a client is swallowed */
+/* virtual output: `kill -USR1 dwl` plugs it in, `kill -USR2 dwl` unplugs it after virtual_grace seconds */
+static const int virtual_enabled = 1;
+static const int virtual_width   = 1920;
+static const int virtual_height  = 1080;
+static const int virtual_grace   = 30;
 static uint32_t colors[][3]                = {
 	/*               fg          bg          border    */
 	[SchemeNorm] = { 0xbbbbbbff, 0x222222ff, 0x444444ff },

@@ -15,7 +15,9 @@
 #include <unistd.h>
 #include <wayland-server-core.h>
 #include <wlr/backend.h>
+#include <wlr/backend/headless.h>
 #include <wlr/backend/libinput.h>
+#include <wlr/backend/multi.h>
 #include <wlr/render/allocator.h>
 #include <wlr/render/wlr_renderer.h>
 #include <wlr/types/wlr_alpha_modifier_v1.h>
@@ -152,7 +154,7 @@ struct Client {
 	uint32_t tags;
 	int isfloating, isurgent, isfullscreen;
 	int isterm, noswallow;
-	int swallowtag; /* pending tag this client claimed at map time; 0 = none */
+	int swallowtag; /* tag read from the app-id ("-dwl<N>"); 0 = none */
 	uint32_t resize; /* configure serial of a pending resize */
 	pid_t pid;
 	Client *swallowing;  /* client being hidden */
@@ -241,6 +243,7 @@ struct Monitor {
 	int nmaster;
 	char ltsymbol[16];
 	int asleep;
+	int isvirtual; /* headless output created on demand, unreachable by user */
 	Drwl *drw;
 	Buffer *pool[2];
 	int lrpad;
@@ -362,6 +365,10 @@ static KeyboardGroup *createkeyboardgroup(void);
 static void createlayersurface(struct wl_listener *listener, void *data);
 static void createlocksurface(struct wl_listener *listener, void *data);
 static void createmon(struct wl_listener *listener, void *data);
+static void createvirtualoutput(void);
+static int virtualoutputcmd(int fd, uint32_t mask, void *data);
+static int virtualoutputtimer(void *data);
+static void mapabsoluteinput(void);
 static void createnotify(struct wl_listener *listener, void *data);
 static void createpointer(struct wlr_pointer *pointer);
 static void createpointerconstraint(struct wl_listener *listener, void *data);
@@ -418,6 +425,8 @@ static void outputmgrapplyortest(struct wlr_output_configuration_v1 *config, int
 static void outputmgrtest(struct wl_listener *listener, void *data);
 static pid_t parentpid(pid_t pid);
 static int getenvtag(pid_t pid);
+static Client *termfortag(pid_t pid);
+static int intmux(pid_t pid);
 static void pointerfocus(Client *c, struct wlr_surface *surface,
 		double sx, double sy, uint32_t time);
 static void powermgrsetmode(struct wl_listener *listener, void *data);
@@ -441,8 +450,6 @@ static void setsel(struct wl_listener *listener, void *data);
 static void setup(void);
 static void spawn(const Arg *arg);
 static int isknownterminal(const char *cmd);
-static int swallowtag_push(void);
-static int swallowtag_pop(void);
 static void startdrag(struct wl_listener *listener, void *data);
 static int statusin(int fd, unsigned int mask, void *data);
 static void tag(const Arg *arg);
@@ -499,6 +506,12 @@ static int locked;
 static void *exclusive_focus;
 static struct wl_display *dpy;
 static struct wl_event_loop *event_loop;
+
+/* virtual output: created by SIGUSR1, destroyed virtual_grace seconds after SIGUSR2 */
+static struct wlr_backend *headless_backend;
+static struct wlr_output *virtual_output;
+static struct wl_event_source *virtual_timer;
+static int virtual_sigfd[2] = {-1, -1};
 static struct wlr_backend *backend;
 static struct wlr_scene *scene;
 static struct wlr_scene_tree *layers[NUM_LAYERS];
@@ -611,14 +624,12 @@ static struct wlr_xwayland *xwayland;
 static pid_t *autostart_pids;
 static size_t autostart_len;
 
-/* swallow tagging: lets spawn() mark a newly-launched terminal so a later
- * GUI app it spawns can be swallowed by the exact right window, even when
- * multiple terminal windows share one underlying process (e.g. footclient
- * connecting to a foot --server instance) and can't be told apart by pid */
-#define SWALLOWTAG_CAP 8
+/* swallow tagging: spawn() gives each bare terminal window a unique app-id
+ * suffix ("<name>-dwl<N>") and exports N as DWL_TERM_TAG in its shell, so a
+ * GUI app started there can be matched to that exact window even when many
+ * windows share one process (footclient connected to one foot --server) */
+#define SWALLOWTAG_MARK "-dwl"
 static int swallowtag_next = 1; /* 0 is reserved to mean "no tag" */
-static int swallowtag_pending[SWALLOWTAG_CAP];
-static unsigned int swallowtag_head, swallowtag_tail, swallowtag_count;
 
 /* configuration, allows nested code to access above variables */
 #include "config.h"
@@ -653,6 +664,8 @@ applyrules(Client *c)
 	int i;
 	const Rule *r;
 	Monitor *mon = selmon, *m;
+	struct wlr_output *out;
+	const char *tagp;
 
 	appid = client_get_appid(c);
 	title = client_get_title(c);
@@ -674,21 +687,25 @@ applyrules(Client *c)
 		}
 	}
 
-	/* Claim a pending swallow tag for this terminal, exactly once: applyrules()
-	 * runs again from mapnotify() after the first call from commitnotify(), so
-	 * guard against popping a second, unrelated tag on the second pass. */
-	if (c->isterm && !c->swallowtag)
-		c->swallowtag = swallowtag_pop();
+	/* the tag lives in the app-id, so it identifies this very window */
+	if (c->isterm && !c->swallowtag && (tagp = strstr(appid, SWALLOWTAG_MARK)))
+		c->swallowtag = atoi(tagp + strlen(SWALLOWTAG_MARK));
 
   c->isfloating |= client_is_float_type(c);
+	/* a client fullscreening on a given output goes there (xdg-shell) */
+	if (c->type == XDGShell && c->surface.xdg->toplevel->requested.fullscreen
+			&& (out = c->surface.xdg->toplevel->requested.fullscreen_output)
+			&& out->data)
+		mon = out->data;
+
   if (enableautoswallow && !c->noswallow && !c->isfloating &&
     !c->surface.xdg->initial_commit) {
     Client *p = NULL;
-    int swtag = getenvtag(c->pid);
-    if (swtag)
-      p = clientfortag(swtag);
-    if (!p)
-      p = termforwin(c); /* fallback: untagged launch (e.g. manual footclient) */
+    if (!intmux(c->pid)) {
+      p = termfortag(c->pid);
+      if (!p)
+        p = termforwin(c); /* fallback: untagged launch (e.g. manual footclient) */
+    }
     if (p)
       swallow(c, p);
   }
@@ -1063,6 +1080,9 @@ cleanupmon(struct wl_listener *listener, void *data)
 	LayerSurface *l, *tmp;
 	size_t i;
 
+	if (m->isvirtual)
+		virtual_output = NULL;
+
 	/* m->layers[i] are intentionally not unlinked */
 	for (i = 0; i < LENGTH(m->layers); i++) {
 		wl_list_for_each_safe(l, tmp, &m->layers[i], link)
@@ -1142,11 +1162,11 @@ closemon(Monitor *m)
 	if (!nmons) {
 		selmon = NULL;
 	} else if (m == selmon) {
-		do /* don't switch to disabled mons */
+		do /* don't switch to disabled or virtual mons */
 			selmon = wl_container_of(mons.next, selmon, link);
-		while (!selmon->wlr_output->enabled && i++ < nmons);
+		while ((!selmon->wlr_output->enabled || selmon->isvirtual) && i++ < nmons);
 
-		if (!selmon->wlr_output->enabled)
+		if (!selmon->wlr_output->enabled || selmon->isvirtual)
 			selmon = NULL;
 	}
 
@@ -1400,6 +1420,9 @@ createmon(struct wl_listener *listener, void *data)
 
 	m = wlr_output->data = ecalloc(1, sizeof(*m));
 	m->wlr_output = wlr_output;
+	m->isvirtual = headless_backend && wlr_output_is_headless(wlr_output);
+	if (m->isvirtual)
+		virtual_output = wlr_output;
 
 	for (i = 0; i < LENGTH(m->layers); i++)
 		wl_list_init(&m->layers[i]);
@@ -1424,7 +1447,8 @@ createmon(struct wl_listener *listener, void *data)
 			wlr_output_state_set_scale(&state, r->scale);
 			wlr_output_state_set_transform(&state, r->rr);
 
-			wlr_output_state_set_adaptive_sync_enabled(&state, r->adaptive);
+			if (!m->isvirtual) /* headless outputs cannot do adaptive sync */
+				wlr_output_state_set_adaptive_sync_enabled(&state, r->adaptive);
 
 			if(r->mode == -1)
 				wlr_output_state_set_custom_mode(&state, r->resx, r->resy,
@@ -1478,10 +1502,83 @@ createmon(struct wl_listener *listener, void *data)
 	 * output (such as DPI, scale factor, manufacturer, etc).
 	 */
 	m->scene_output = wlr_scene_output_create(scene, wlr_output);
-	if (m->m.x == -1 && m->m.y == -1)
+	if (m->isvirtual && !wlr_output->enabled) {
+		wlr_log(WLR_ERROR, "virtual output could not be enabled");
+		wlr_output_destroy(wlr_output);
+		return;
+	}
+	if (m->isvirtual || (m->m.x == -1 && m->m.y == -1))
 		wlr_output_layout_add_auto(output_layout, wlr_output);
 	else
 		wlr_output_layout_add(output_layout, wlr_output, m->m.x, m->m.y);
+}
+
+void
+createvirtualoutput(void)
+{
+	/* SIGUSR1: behave as if a monitor was just plugged in. A pending
+	 * destruction (SIGUSR2 grace period) is cancelled. */
+	if (virtual_timer)
+		wl_event_source_timer_update(virtual_timer, 0);
+	if (!headless_backend || virtual_output)
+		return;
+	/* virtual_output is set by createmon() when the backend announces it */
+	if (!wlr_headless_add_output(headless_backend, virtual_width, virtual_height))
+		wlr_log(WLR_ERROR, "could not create virtual output");
+}
+
+int
+virtualoutputcmd(int fd, uint32_t mask, void *data)
+{
+	char cmd;
+
+	while (read(fd, &cmd, 1) > 0) {
+		if (cmd == 'c')
+			createvirtualoutput();
+		else if (cmd == 'd' && virtual_timer)
+			wl_event_source_timer_update(virtual_timer, virtual_grace * 1000);
+	}
+	return 0;
+}
+
+int
+virtualoutputtimer(void *data)
+{
+	if (virtual_output)
+		wlr_output_destroy(virtual_output);
+	return 0;
+}
+
+void
+mapabsoluteinput(void)
+{
+	/* Absolute devices (tablets, touch) span the whole output layout: keep
+	 * them on the physical monitors while the virtual one exists. */
+	Monitor *m;
+	struct wlr_box box = {0};
+	int hasvirtual = 0, found = 0;
+	int x2, y2;
+
+	wl_list_for_each(m, &mons, link) {
+		if (m->isvirtual) {
+			hasvirtual = 1;
+			continue;
+		}
+		if (!m->wlr_output->enabled)
+			continue;
+		if (!found) {
+			box = m->m;
+			found = 1;
+			continue;
+		}
+		x2 = MAX(box.x + box.width, m->m.x + m->m.width);
+		y2 = MAX(box.y + box.height, m->m.y + m->m.height);
+		box.x = MIN(box.x, m->m.x);
+		box.y = MIN(box.y, m->m.y);
+		box.width = x2 - box.x;
+		box.height = y2 - box.y;
+	}
+	wlr_cursor_map_to_region(cursor, hasvirtual && found ? &box : NULL);
 }
 
 void
@@ -1764,12 +1861,15 @@ dirtomon(enum wlr_direction dir)
 	struct wlr_output *next;
 	if (!wlr_output_layout_get(output_layout, selmon->wlr_output))
 		return selmon;
+	/* the virtual output is never a target for focus or window moves */
 	if ((next = wlr_output_layout_adjacent_output(output_layout,
-			dir, selmon->wlr_output, selmon->m.x, selmon->m.y)))
+			dir, selmon->wlr_output, selmon->m.x, selmon->m.y))
+			&& !((Monitor *)next->data)->isvirtual)
 		return next->data;
 	if ((next = wlr_output_layout_farthest_output(output_layout,
 			dir ^ (WLR_DIRECTION_LEFT|WLR_DIRECTION_RIGHT),
-			selmon->wlr_output, selmon->m.x, selmon->m.y)))
+			selmon->wlr_output, selmon->m.x, selmon->m.y))
+			&& !((Monitor *)next->data)->isvirtual)
 		return next->data;
 	return selmon;
 }
@@ -1977,6 +2077,13 @@ void
 fullscreennotify(struct wl_listener *listener, void *data)
 {
 	Client *c = wl_container_of(listener, c, fullscreen);
+	struct wlr_output *out;
+
+	/* move to the output the client asked for (xdg-shell), if any */
+	if (c->type == XDGShell && c->mon && client_wants_fullscreen(c)
+			&& (out = c->surface.xdg->toplevel->requested.fullscreen_output)
+			&& out->data && out->data != c->mon)
+		setmon(c, out->data, 0);
 	setfullscreen(c, client_wants_fullscreen(c));
 }
 
@@ -2026,6 +2133,13 @@ handlesig(int signo)
 		}
 	} else if (signo == SIGINT || signo == SIGTERM) {
 		quit(NULL);
+	} else if (signo == SIGUSR1 || signo == SIGUSR2) {
+		/* async-signal-safe: hand over to the event loop through a pipe */
+		int saved_errno = errno;
+		char cmd = signo == SIGUSR1 ? 'c' : 'd';
+		ssize_t n = virtual_sigfd[1] >= 0 ? write(virtual_sigfd[1], &cmd, 1) : 0;
+		(void)n;
+		errno = saved_errno;
 	}
 }
 
@@ -2418,6 +2532,7 @@ motionnotify(uint32_t time, struct wlr_input_device *device, double dx, double d
 	double sx = 0, sy = 0, sx_confined, sy_confined;
 	Client *c = NULL, *w = NULL;
 	LayerSurface *l = NULL;
+	Monitor *vm;
 	struct wlr_surface *surface = NULL;
 	struct wlr_pointer_constraint_v1 *constraint;
 
@@ -2456,6 +2571,16 @@ motionnotify(uint32_t time, struct wlr_input_device *device, double dx, double d
 				if (active_constraint->type == WLR_POINTER_CONSTRAINT_V1_LOCKED)
 					return;
 			}
+		}
+
+		/* the cursor never enters the virtual output */
+		if (virtual_output && (vm = virtual_output->data)) {
+			if (wlr_box_contains_point(&vm->m, cursor->x + dx, cursor->y))
+				dx = 0;
+			if (wlr_box_contains_point(&vm->m, cursor->x, cursor->y + dy))
+				dy = 0;
+			if (wlr_box_contains_point(&vm->m, cursor->x + dx, cursor->y + dy))
+				dx = dy = 0;
 		}
 
 		wlr_cursor_move(cursor, device, dx, dy);
@@ -2624,15 +2749,15 @@ parentpid(pid_t pid)
 	return (pid_t)v;
 }
 
-int
-getenvtag(pid_t pid)
+/* copy the value of KEY from /proc/<pid>/environ into out; 0 if absent */
+static int
+readenv(pid_t pid, const char *key, char *out, size_t outlen)
 {
 	char path[64];
-	char buf[4096];
-	int fd, tag = 0;
+	char buf[16384];
+	int fd, found = 0;
 	ssize_t n, total = 0;
-	static const char key[] = "DWL_TERM_TAG=";
-	const size_t keylen = sizeof(key) - 1;
+	size_t keylen = strlen(key);
 	char *p, *end;
 
 	if (!pid)
@@ -2657,12 +2782,42 @@ getenvtag(pid_t pid)
 	/* environ is a sequence of NUL-separated "KEY=VALUE" records */
 	end = buf + total;
 	for (p = buf; p < end; p += strlen(p) + 1) {
-		if (!strncmp(p, key, keylen)) {
-			tag = atoi(p + keylen);
+		if (!strncmp(p, key, keylen) && p[keylen] == '=') {
+			snprintf(out, outlen, "%s", p + keylen + 1);
+			found = 1;
 			break;
 		}
 	}
-	return tag;
+	return found;
+}
+
+int
+getenvtag(pid_t pid)
+{
+	char val[32];
+	return readenv(pid, "DWL_TERM_TAG", val, sizeof(val)) ? atoi(val) : 0;
+}
+
+/* a pane cannot name its terminal window: apps launched from tmux never swallow */
+int
+intmux(pid_t pid)
+{
+	char val[8];
+	return readenv(pid, "TMUX", val, sizeof(val));
+}
+
+/* window of the terminal that (transitively) launched pid, by tag */
+Client *
+termfortag(pid_t pid)
+{
+	Client *p;
+	int tag, i;
+
+	for (i = 0; pid > 1 && i < 32; i++, pid = parentpid(pid)) {
+		if ((tag = getenvtag(pid)) && (p = clientfortag(tag)))
+			return p;
+	}
+	return NULL;
 }
 
 void
@@ -3032,7 +3187,7 @@ setsel(struct wl_listener *listener, void *data)
 void
 setup(void)
 {
-	int drm_fd, i, sig[] = {SIGCHLD, SIGINT, SIGTERM, SIGPIPE};
+	int drm_fd, i, sig[] = {SIGCHLD, SIGINT, SIGTERM, SIGPIPE, SIGUSR1, SIGUSR2};
 	struct sigaction sa = {.sa_flags = SA_RESTART, .sa_handler = handlesig};
 	sigemptyset(&sa.sa_mask);
 
@@ -3046,6 +3201,22 @@ setup(void)
 
 	if (!(backend = wlr_backend_autocreate(event_loop, &session)))
 		die("couldn't create backend");
+
+	if (virtual_enabled && wlr_backend_is_multi(backend)
+			&& (headless_backend = wlr_headless_backend_create(event_loop))) {
+		if (!wlr_multi_backend_add(backend, headless_backend)) {
+			wlr_backend_destroy(headless_backend);
+			headless_backend = NULL;
+		} else if (pipe(virtual_sigfd) == 0) {
+			for (i = 0; i < 2; i++) {
+				fcntl(virtual_sigfd[i], F_SETFD, FD_CLOEXEC);
+				fcntl(virtual_sigfd[i], F_SETFL, O_NONBLOCK);
+			}
+			virtual_timer = wl_event_loop_add_timer(event_loop, virtualoutputtimer, NULL);
+			wl_event_loop_add_fd(event_loop, virtual_sigfd[0], WL_EVENT_READABLE,
+					virtualoutputcmd, NULL);
+		}
+	}
 
 	scene = wlr_scene_create();
 	root_bg = wlr_scene_rect_create(&scene->tree, 0, 0, rootcolor);
@@ -3208,36 +3379,6 @@ isknownterminal(const char *cmd)
 	return 0;
 }
 
-int
-swallowtag_push(void)
-{
-	int swtag = swallowtag_next++;
-	if (swallowtag_next <= 0) /* defensive overflow guard */
-		swallowtag_next = 1;
-
-	if (swallowtag_count == SWALLOWTAG_CAP) {
-		/* ring full: drop the oldest pending tag to make room */
-		swallowtag_head = (swallowtag_head + 1) % SWALLOWTAG_CAP;
-		swallowtag_count--;
-	}
-	swallowtag_pending[swallowtag_tail] = swtag;
-	swallowtag_tail = (swallowtag_tail + 1) % SWALLOWTAG_CAP;
-	swallowtag_count++;
-	return swtag;
-}
-
-int
-swallowtag_pop(void)
-{
-	int swtag;
-	if (swallowtag_count == 0)
-		return 0;
-	swtag = swallowtag_pending[swallowtag_head];
-	swallowtag_head = (swallowtag_head + 1) % SWALLOWTAG_CAP;
-	swallowtag_count--;
-	return swtag;
-}
-
 void
 spawn(const Arg *arg)
 {
@@ -3258,21 +3399,27 @@ spawn(const Arg *arg)
 	 * export the tag into, and appending our wrapper after nvim's own argv
 	 * would corrupt what's actually being run. */
 	if (argc == 1 && isknownterminal(argv[0])) {
-		char tagbuf[64];
+		char tagbuf[64], idbuf[128];
 		char **wrapped;
 		int i, swtag;
 
-		swtag = swallowtag_push();
+		swtag = swallowtag_next++;
+		if (swallowtag_next <= 0)
+			swallowtag_next = 1;
 		snprintf(tagbuf, sizeof(tagbuf),
 				"export DWL_TERM_TAG=%d; exec \"$SHELL\"", swtag);
+		snprintf(idbuf, sizeof(idbuf), "%s" SWALLOWTAG_MARK "%d",
+				(strrchr(argv[0], '/') ? strrchr(argv[0], '/') + 1 : argv[0]), swtag);
 
-		wrapped = ecalloc(argc + 4, sizeof(char *));
+		wrapped = ecalloc(argc + 6, sizeof(char *));
 		for (i = 0; i < argc; i++)
 			wrapped[i] = argv[i];
-		wrapped[argc]     = "sh";
-		wrapped[argc + 1] = "-c";
-		wrapped[argc + 2] = tagbuf;
-		wrapped[argc + 3] = NULL;
+		wrapped[argc]     = "-a";
+		wrapped[argc + 1] = idbuf;
+		wrapped[argc + 2] = "sh";
+		wrapped[argc + 3] = "-c";
+		wrapped[argc + 4] = tagbuf;
+		wrapped[argc + 5] = NULL;
 
 		if (fork() == 0) {
 			close(STDIN_FILENO);
@@ -3422,8 +3569,15 @@ termforwin(Client *c)
 		wl_list_for_each(p, &clients, link) {
 			if (!p->pid || !p->isterm || p->swallowedby)
 				continue;
-			if (pids[i] == p->pid)
+			if (pids[i] == p->pid) {
+				/* several windows behind one process (foot server)
+				 * cannot be told apart: better no swallow than a wrong one */
+				Client *o;
+				wl_list_for_each(o, &clients, link)
+					if (o != p && o->isterm && !o->swallowedby && o->pid == p->pid)
+						return NULL;
 				return p;
+			}
 		}
 	}
 
@@ -3705,10 +3859,12 @@ updatemons(struct wl_listener *listener, void *data)
 		config_head->state.x = m->m.x;
 		config_head->state.y = m->m.y;
 
-		if (!selmon) {
+		if (!selmon && !m->isvirtual) {
 			selmon = m;
 		}
 	}
+
+	mapabsoluteinput();
 
 	if (selmon && selmon->wlr_output->enabled) {
 		wl_list_for_each(c, &clients, link) {
@@ -3751,7 +3907,8 @@ updatebar(Monitor *m)
   m->b.width      = rw - (2 * barmarginh);
   m->b.real_width = (int)((float)rw / m->wlr_output->scale) - (2 * barmarginh);
 
-	wlr_scene_node_set_enabled(&m->scene_buffer->node, m->wlr_output->enabled ? showbar : 0);
+	wlr_scene_node_set_enabled(&m->scene_buffer->node,
+			m->wlr_output->enabled && !m->isvirtual ? showbar : 0);
 
 	for (i = 0; i < LENGTH(m->pool); i++)
 		if (m->pool[i]) {

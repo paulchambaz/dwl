@@ -105,6 +105,13 @@ let
       };
     };
 
+    virtual_output = {
+      enable = true;
+      width = 1920;
+      height = 1080;
+      grace_seconds = 30;
+    };
+
     windows = {
       swallow = {
         enable = true;
@@ -1254,6 +1261,10 @@ let
       static const float        fullscreen_bg[]           = COLOR(${hexToColorMacro cfg.appearance.colors.fullscreen});
       static int                enableautoswallow         = ${formatValue cfg.windows.swallow.enable};
       static float              swallowborder             = ${formatValue cfg.windows.swallow.border_multiplier};
+      static const int          virtual_enabled           = ${formatValue cfg.virtual_output.enable};
+      static const int          virtual_width             = ${formatValue cfg.virtual_output.width};
+      static const int          virtual_height            = ${formatValue cfg.virtual_output.height};
+      static const int          virtual_grace             = ${formatValue cfg.virtual_output.grace_seconds};
 
       static uint32_t colors[][3] = {
           ${formatColorScheme cfg.appearance.colors}
