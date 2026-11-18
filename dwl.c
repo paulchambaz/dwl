@@ -28,6 +28,8 @@
 #include <wlr/types/wlr_data_device.h>
 #include <wlr/types/wlr_drm.h>
 #include <wlr/types/wlr_export_dmabuf_v1.h>
+#include <wlr/types/wlr_ext_image_capture_source_v1.h>
+#include <wlr/types/wlr_ext_image_copy_capture_v1.h>
 #include <wlr/types/wlr_fractional_scale_v1.h>
 #include <wlr/types/wlr_gamma_control_v1.h>
 #include <wlr/types/wlr_idle_inhibit_v1.h>
@@ -1861,15 +1863,12 @@ dirtomon(enum wlr_direction dir)
 	struct wlr_output *next;
 	if (!wlr_output_layout_get(output_layout, selmon->wlr_output))
 		return selmon;
-	/* the virtual output is never a target for focus or window moves */
 	if ((next = wlr_output_layout_adjacent_output(output_layout,
-			dir, selmon->wlr_output, selmon->m.x, selmon->m.y))
-			&& !((Monitor *)next->data)->isvirtual)
+			dir, selmon->wlr_output, selmon->m.x, selmon->m.y)))
 		return next->data;
 	if ((next = wlr_output_layout_farthest_output(output_layout,
 			dir ^ (WLR_DIRECTION_LEFT|WLR_DIRECTION_RIGHT),
-			selmon->wlr_output, selmon->m.x, selmon->m.y))
-			&& !((Monitor *)next->data)->isvirtual)
+			selmon->wlr_output, selmon->m.x, selmon->m.y)))
 		return next->data;
 	return selmon;
 }
@@ -2532,7 +2531,6 @@ motionnotify(uint32_t time, struct wlr_input_device *device, double dx, double d
 	double sx = 0, sy = 0, sx_confined, sy_confined;
 	Client *c = NULL, *w = NULL;
 	LayerSurface *l = NULL;
-	Monitor *vm;
 	struct wlr_surface *surface = NULL;
 	struct wlr_pointer_constraint_v1 *constraint;
 
@@ -2571,16 +2569,6 @@ motionnotify(uint32_t time, struct wlr_input_device *device, double dx, double d
 				if (active_constraint->type == WLR_POINTER_CONSTRAINT_V1_LOCKED)
 					return;
 			}
-		}
-
-		/* the cursor never enters the virtual output */
-		if (virtual_output && (vm = virtual_output->data)) {
-			if (wlr_box_contains_point(&vm->m, cursor->x + dx, cursor->y))
-				dx = 0;
-			if (wlr_box_contains_point(&vm->m, cursor->x, cursor->y + dy))
-				dy = 0;
-			if (wlr_box_contains_point(&vm->m, cursor->x + dx, cursor->y + dy))
-				dx = dy = 0;
 		}
 
 		wlr_cursor_move(cursor, device, dx, dy);
@@ -3249,6 +3237,8 @@ setup(void)
 	wlr_data_device_manager_create(dpy);
 	wlr_export_dmabuf_manager_v1_create(dpy);
 	wlr_screencopy_manager_v1_create(dpy);
+	wlr_ext_image_copy_capture_manager_v1_create(dpy, 1);
+	wlr_ext_output_image_capture_source_manager_v1_create(dpy, 1);
 	wlr_data_control_manager_v1_create(dpy);
 	wlr_primary_selection_v1_device_manager_create(dpy);
 	wlr_viewporter_create(dpy);
